@@ -30,3 +30,12 @@
 *.exe
 *.out
 *.app
+
+# qmake generated files
+Makefile
+.qmake.stash
+moc_*.*
+ui_*.*
+dist
+
+.DS_Store
