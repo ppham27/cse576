@@ -10,9 +10,9 @@ TARGET = ImgFilter
 TEMPLATE = app
 
 
-SOURCES += main.cpp\
-        mainwindow.cpp \
-    Project1.cpp
+SOURCES += main.cpp \
+           mainwindow.cpp \
+           Project1.cpp
 
 HEADERS  += mainwindow.h
 

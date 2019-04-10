@@ -36,6 +36,7 @@ Makefile
 .qmake.stash
 moc_*.*
 ui_*.*
-dist
+target_wrapper.sh
+*.moc
 
 .DS_Store

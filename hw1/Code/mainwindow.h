@@ -36,6 +36,7 @@ private:
     bool zoomChanged;
 
     void DrawDisplayImage();
+ protected:  // For testing purposes.
     void BlackWhiteImage(QImage *image);
     void AddNoise(QImage *image, double mag, bool colorNoise);
     void MeanBlurImage(QImage *image, int radius);

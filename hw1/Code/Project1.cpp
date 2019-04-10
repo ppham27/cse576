@@ -1,7 +1,10 @@
+#include <cmath>
+#include <QtGui>
+#include <string>
+
 #include "mainwindow.h"
 #include "math.h"
 #include "ui_mainwindow.h"
-#include <QtGui>
 
 /***********************************************************************
   This is the only file you need to change for your assignment. The
@@ -209,7 +212,10 @@ void MainWindow::Convolution(double** image, double *kernel, int kernelWidth, in
  * add: a boolean variable (taking values true or false)
 */
 {
-    // Add your code here
+  Q_ASSERT_X(kernelWidth > 0 && kernelWidth % 2 == 1,
+             "convolution", "kernel width must be positive and odd");
+  Q_ASSERT_X(kernelHeight > 0 && kernelHeight % 2 == 1,
+             "convolution", "kernel height must be positive and odd.");
 }
 
 /**************************************************
@@ -223,7 +229,14 @@ void MainWindow::GaussianBlurImage(double** image, double sigma)
  * sigma: standard deviation for the Gaussian kernel
 */
 {
-    // Add your code here
+  int radius = static_cast<int>(3 * ceil(sigma));
+  double *kernel;
+  Convolution(image, kernel, 1, 0, false);
+  // for (int i = 0; i < imageWidth; ++i) {
+  //   for (int j = 0; j < imageHeight; ++j) {
+  //     image[j*imageWidth + i][0] = image[j*imageWidth + i][1] = image[j*imageWidth + i][2] = 0;
+  //   }
+  // }
 }
 
 /**************************************************
