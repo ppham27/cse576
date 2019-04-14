@@ -272,11 +272,11 @@ void MainWindow::GaussianBlurImage(double** image, double sigma)
 {
   int radius = static_cast<int>(3 * ceil(sigma));
   int size = 2 * radius + 1;
+  double sigma2 = sigma*sigma;
   double* kernel = new double[size*size];
   for (int i = 0; i < size; ++i) {
     for (int j = 0; j < size; ++j) {
       int r = i - radius, c = j - radius;
-      double sigma2 = sigma*sigma;
       kernel[j*size + i] = exp(-(r*r + c*c)/(2*sigma2))/(2*M_PI*sigma2);
     }
   }
@@ -296,7 +296,18 @@ void MainWindow::SeparableGaussianBlurImage(double** image, double sigma)
  * sigma: standard deviation for the Gaussian kernel
 */
 {
-    // Add your code here
+  int radius = static_cast<int>(3 * ceil(sigma));
+  int size = 2 * radius + 1;
+  double sigma2 = sigma*sigma;
+  double* kernel = new double[size];
+  for (int i = 0; i < size; ++i) {
+    int x = i - radius;
+    kernel[i] = exp(-(x*x)/(2*sigma2))/(sigma*sqrt(2*M_PI));
+  }
+  NormalizeKernel(kernel, size, 1);
+  Convolution(image, kernel, size, 1, false);
+  Convolution(image, kernel, 1, size, false);
+  delete[] kernel;
 }
 
 /********** TASK 4 (a) **********/

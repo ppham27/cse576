@@ -1,3 +1,4 @@
+#include <cstring>
 #include <QtGui>
 #include <QtTest/QtTest>
 
@@ -60,16 +61,29 @@ void Project1Test::TestGaussianBlur() {
   window.imageHeight = 4;
   window.imageWidth = 3;
 
-  double **image = new double*[12]{
+  double **image1 = new double*[12]{
     new double[3]{1, 2, 3}, new double[3]{4, 5, 6}, new double[3]{7, 8, 9},
     new double[3]{10, 11, 12}, new double[3]{13, 14, 15}, new double[3]{16, 17, 18},
     new double[3]{19, 20, 21}, new double[3]{22, 23, 24}, new double[3]{25, 26, 27},
     new double[3]{28, 29, 30}, new double[3]{31, 32, 33}, new double[3]{34, 35, 36}};
 
-  window.GaussianBlurImage(image, 1.);
+  double **image2 = new double*[12];
+  for (int i = 0; i < window.imageHeight*window.imageWidth; ++i) {
+    image2[i] = new double[3];
+    std::memcpy(image2[i], image1[i], 3*sizeof(double));
+  }
 
-  for (int i = 0; i < window.imageHeight*window.imageWidth; ++i) delete[] image[i];
-  delete[] image;
+  window.GaussianBlurImage(image1, 2.);
+  window.SeparableGaussianBlurImage(image2, 2.);
+
+  for (int i = 0; i < window.imageHeight*window.imageWidth; ++i)
+    for (int j = 0; j < 3; ++j)
+      QVERIFY(qFloatDistance(image1[i][j], image2[i][j]) < (1ULL << 34));
+
+  for (int i = 0; i < window.imageHeight*window.imageWidth; ++i) {
+    delete[] image1[i]; delete[] image2[i];
+  }
+  delete[] image1; delete[] image2;
 }
 
 QTEST_MAIN(Project1Test)
