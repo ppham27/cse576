@@ -29,8 +29,10 @@ private:
     QImage outImage;
     QImage displayImage;
     double** Image;
+ protected:    
     int imageWidth;
     int imageHeight;
+ private:
     double xScroll;
     double yScroll;
     bool zoomChanged;

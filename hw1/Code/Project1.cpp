@@ -1,4 +1,5 @@
 #include <cmath>
+#include <cstring>
 #include <QtGui>
 #include <string>
 
@@ -216,6 +217,46 @@ void MainWindow::Convolution(double** image, double *kernel, int kernelWidth, in
              "convolution", "kernel width must be positive and odd");
   Q_ASSERT_X(kernelHeight > 0 && kernelHeight % 2 == 1,
              "convolution", "kernel height must be positive and odd.");
+  // Buffer image.
+  int padding[4] = {/*top=*/kernelHeight/2,
+                    /*right=*/(kernelWidth - 1)/2,
+                    /*bottom=*/(kernelHeight - 1)/2,
+                    /*left=*/kernelWidth/2};
+  int imageBufferWidth = padding[1] + imageWidth + padding[3];
+  int imageBufferHeight = padding[0] + imageHeight + padding[2];
+  double **imageBuffer = new double*[imageBufferWidth*imageBufferHeight];
+  for (int i = 0; i < imageBufferWidth; ++i) {
+    for (int j = 0; j < imageBufferHeight; ++j) {
+      if (i < padding[1] || i >= imageWidth + padding[1] ||
+          j < padding[0] || j >= imageHeight + padding[0]) {
+        imageBuffer[j*imageBufferWidth + i] = new double[3]{0, 0, 0};
+      } else {
+        imageBuffer[j*imageBufferWidth + i] = new double[3];
+        std::memcpy(imageBuffer[j*imageBufferWidth + i],
+                    image[(j - padding[0])*imageWidth + (i - padding[3])],
+                    3*sizeof(double));
+      }      
+    }
+  }
+  // Convolve image.
+  for (int i = 0; i < imageWidth; ++i) {
+    for (int j = 0; j < imageHeight; ++j) {
+      for (int c = 0; c < 3; ++c) {
+        image[j*imageWidth + i][c] = 0;        
+        for (int k = 0; k < kernelWidth; ++k) {
+          int x = i + k;
+          for (int l = 0; l < kernelHeight; ++l) {
+            int y = j + l;
+            image[j*imageWidth + i][c] +=
+              kernel[l*kernelWidth + k]*imageBuffer[y*imageBufferWidth + x][c];
+          }
+        }
+      }
+    }
+  }
+  // Clean up.
+  for (int i = 0; i < imageBufferWidth * imageBufferHeight; ++i) delete[] imageBuffer[i];
+  delete[] imageBuffer;
 }
 
 /**************************************************
@@ -230,13 +271,18 @@ void MainWindow::GaussianBlurImage(double** image, double sigma)
 */
 {
   int radius = static_cast<int>(3 * ceil(sigma));
-  double *kernel;
-  Convolution(image, kernel, 1, 0, false);
-  // for (int i = 0; i < imageWidth; ++i) {
-  //   for (int j = 0; j < imageHeight; ++j) {
-  //     image[j*imageWidth + i][0] = image[j*imageWidth + i][1] = image[j*imageWidth + i][2] = 0;
-  //   }
-  // }
+  int size = 2 * radius + 1;
+  double* kernel = new double[size*size];
+  for (int i = 0; i < size; ++i) {
+    for (int j = 0; j < size; ++j) {
+      int r = i - radius, c = j - radius;
+      double sigma2 = sigma*sigma;
+      kernel[j*size + i] = exp(-(r*r + c*c)/(2*sigma2))/(2*M_PI*sigma2);
+    }
+  }
+  NormalizeKernel(kernel, size, size);
+  Convolution(image, kernel, /*kernelWidth=*/size, /*kernelHeight=*/size, /*add=*/false);
+  delete[] kernel;
 }
 
 /**************************************************
