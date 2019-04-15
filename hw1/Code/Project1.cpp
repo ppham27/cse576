@@ -1,3 +1,4 @@
+#include <algorithm>
 #include <cmath>
 #include <cstring>
 #include <QtGui>
@@ -367,7 +368,17 @@ void MainWindow::SharpenImage(double** image, double sigma, double alpha)
  * alpha: constant by which the second derivative image is to be multiplied to before subtracting it from the original image
 */
 {
-    // Add your code here
+  double** imageSecondDeriv = new double*[imageWidth*imageHeight];
+  for (int i = 0; i < imageWidth*imageHeight; ++i) {
+    imageSecondDeriv[i] = new double[3];
+    std::memcpy(imageSecondDeriv[i], image[i], 3*sizeof(double));
+  }
+  SecondDerivImage(imageSecondDeriv, sigma);
+  for (int i = 0; i < imageWidth*imageHeight; ++i)
+    for (int c = 0; c < 3; ++c) image[i][c] -= alpha*(imageSecondDeriv[i][c] - 128);
+
+  for (int i = 0; i < imageWidth*imageHeight; ++i) delete[] imageSecondDeriv[i];
+  delete[] imageSecondDeriv;
 }
 
 /**************************************************
