@@ -242,7 +242,7 @@ void MainWindow::Convolution(double** image, double *kernel, int kernelWidth, in
   for (int i = 0; i < imageWidth; ++i) {
     for (int j = 0; j < imageHeight; ++j) {
       for (int c = 0; c < 3; ++c) {
-        image[j*imageWidth + i][c] = 0;        
+        image[j*imageWidth + i][c] = add ? 128 : 0;
         for (int k = 0; k < kernelWidth; ++k) {
           int x = i + k;
           for (int l = 0; l < kernelHeight; ++l) {
@@ -319,7 +319,10 @@ void MainWindow::FirstDerivImage_x(double** image, double sigma)
  * sigma: standard deviation for the Gaussian kernel
 */
 {
-    // Add your code here
+  double *kernel = new double[3]{-1, 0, 1};
+  Convolution(image, kernel, 3, 1, true);
+  GaussianBlurImage(image, sigma);
+  delete[] kernel;
 }
 
 /********** TASK 4 (b) **********/
@@ -331,7 +334,10 @@ void MainWindow::FirstDerivImage_y(double** image, double sigma)
  * sigma: standard deviation for the Gaussian kernel
 */
 {
-    // Add your code here
+  double *kernel = new double[3]{-1, 0, 1};
+  Convolution(image, kernel, 1, 3, true);
+  GaussianBlurImage(image, sigma);
+  delete[] kernel;
 }
 
 /********** TASK 4 (c) **********/
@@ -343,7 +349,10 @@ void MainWindow::SecondDerivImage(double** image, double sigma)
  * sigma: standard deviation for the Gaussian kernel
 */
 {
-    // Add your code here
+  double *kernel = new double[9]{0, 1, 0, 1, -4, 1, 0, 1, 0};
+  Convolution(image, kernel, 3, 3, true);
+  GaussianBlurImage(image, sigma);
+  delete[] kernel;
 }
 
 /**************************************************

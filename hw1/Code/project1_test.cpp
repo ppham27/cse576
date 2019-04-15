@@ -10,6 +10,9 @@ private slots:
   void TestBlackWhiteImage();
   void TestConvolution();
   void TestGaussianBlur();
+  void TestFirstDerivImage_x();
+  void TestFirstDerivImage_y();
+  void TestSecondDerivImage();
 };
 
 namespace {
@@ -84,6 +87,57 @@ void Project1Test::TestGaussianBlur() {
     delete[] image1[i]; delete[] image2[i];
   }
   delete[] image1; delete[] image2;
+}
+
+void Project1Test::TestFirstDerivImage_x() {
+  TestWindow window;
+  window.imageHeight = 4;
+  window.imageWidth = 3;
+
+  double **image = new double*[12]{
+    new double[3]{1, 2, 3}, new double[3]{4, 5, 6}, new double[3]{7, 8, 9},
+    new double[3]{10, 11, 12}, new double[3]{13, 14, 15}, new double[3]{16, 17, 18},
+    new double[3]{19, 20, 21}, new double[3]{22, 23, 24}, new double[3]{25, 26, 27},
+    new double[3]{28, 29, 30}, new double[3]{31, 32, 33}, new double[3]{34, 35, 36}};
+  window.FirstDerivImage_x(image, 1.0);
+
+  QCOMPARE(image[4][0], 108.17637380156558890576);
+  QCOMPARE(image[4][1], 108.17637380156557469491);
+  QCOMPARE(image[4][2], 108.17637380156558890576);
+}
+
+void Project1Test::TestFirstDerivImage_y() {
+  TestWindow window;
+  window.imageHeight = 4;
+  window.imageWidth = 3;
+
+  double **image = new double*[12]{
+    new double[3]{1, 2, 3}, new double[3]{4, 5, 6}, new double[3]{7, 8, 9},
+    new double[3]{10, 11, 12}, new double[3]{13, 14, 15}, new double[3]{16, 17, 18},
+    new double[3]{19, 20, 21}, new double[3]{22, 23, 24}, new double[3]{25, 26, 27},
+    new double[3]{28, 29, 30}, new double[3]{31, 32, 33}, new double[3]{34, 35, 36}};
+  window.FirstDerivImage_y(image, 1.0);
+
+  QCOMPARE(image[4][0], 117.85290332319146955342);
+  QCOMPARE(image[4][1], 118.01895729671271340067);
+  QCOMPARE(image[4][2], 118.18501127023395724791);
+}
+
+void Project1Test::TestSecondDerivImage() {
+  TestWindow window;
+  window.imageHeight = 4;
+  window.imageWidth = 3;
+
+  double **image = new double*[12]{
+    new double[3]{1, 2, 3}, new double[3]{4, 5, 6}, new double[3]{7, 8, 9},
+    new double[3]{10, 11, 12}, new double[3]{13, 14, 15}, new double[3]{16, 17, 18},
+    new double[3]{19, 20, 21}, new double[3]{22, 23, 24}, new double[3]{25, 26, 27},
+    new double[3]{28, 29, 30}, new double[3]{31, 32, 33}, new double[3]{34, 35, 36}};
+  window.SecondDerivImage(image, 1.0);
+
+  QCOMPARE(image[4][0], 98.72575030383104888188);
+  QCOMPARE(image[4][1], 98.01067175307645129578);
+  QCOMPARE(image[4][2], 97.29559320232185370969);
 }
 
 QTEST_MAIN(Project1Test)
