@@ -10,7 +10,7 @@
     export PATH="$HOME/Qt/$QT_VERSION/clang_64/bin:$PATH"
     ```
 
-    to your `$HOME/.bash_profile`. Substitue `$QT_VERSION` as necessary.
+    to your `$HOME/.bash_profile`. Substitute `$QT_VERSION` as necessary.
 
 ## Homework 1
 
