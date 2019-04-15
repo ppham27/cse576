@@ -392,15 +392,38 @@ void MainWindow::SobelImage(double** image)
  * NOTE: image is grayscale here, i.e., all 3 channels have the same value which is the grayscale value
 */
 {
-    // Add your code here
+  double** imageX = new double*[imageWidth*imageHeight];
+  double** imageY = new double*[imageWidth*imageHeight];
+  for (int i = 0; i < imageWidth*imageHeight; ++i) {
+    imageX[i] = new double[3];
+    imageY[i] = new double[3];
+    std::memcpy(imageX[i], image[i], 3*sizeof(double));
+    std::memcpy(imageY[i], image[i], 3*sizeof(double));
+  }
+  double* kernelX = new double[9]{-1,0,1,-2,0,2,-1,0,1};
+  double* kernelY = new double[9]{1,2,1,0,0,0,-1,-2,-1};
 
-    // Use the following 3 lines of code to set the image pixel values after computing magnitude and orientation
-    // Here 'mag' is the magnitude and 'orien' is the orientation angle in radians to be computed using atan2 function
-    // (sin(orien) + 1)/2 converts the sine value to the range [0,1]. Similarly for cosine.
+  Convolution(imageX, kernelX, 3, 3, false);
+  Convolution(imageY, kernelY, 3, 3, false);
+  for (int i = 0; i < imageWidth*imageHeight; ++i) {
+    // Divide magnitude by 8 to avoid spurious edges.
+    double magnitude = sqrt(imageX[i][0]*imageX[i][0] + imageY[i][0]*imageY[i][0])/8;
+    double orientation = atan2(imageY[i][0], imageX[i][0]);
+    // The following 3 lines of code to set the image pixel values after
+    // computing magnitude and orientation (sin(orien) + 1)/2 converts the sine
+    // value to the range [0,1]. Similarly for cosine.
+    image[i][0] = magnitude*4.0*(sin(orientation) + 1.0)/2.0;
+    image[i][1] = magnitude*4.0*(cos(orientation) + 1.0)/2.0;
+    image[i][2] = magnitude*4.0 - image[i][0] - image[i][1];
+  }
 
-    // image[r*imageWidth+c][0] = mag*4.0*((sin(orien) + 1.0)/2.0);
-    // image[r*imageWidth+c][1] = mag*4.0*((cos(orien) + 1.0)/2.0);
-    // image[r*imageWidth+c][2] = mag*4.0 - image[r*imageWidth+c][0] - image[r*imageWidth+c][1];
+  delete[] kernelX;
+  delete[] kernelY;
+  for (int i = 0; i < imageWidth*imageHeight; ++i) {
+    delete[] imageX[i]; delete[] imageY[i];
+  }
+  delete[] imageX;
+  delete[] imageY;
 }
 
 /**************************************************
@@ -475,7 +498,7 @@ void MainWindow::FindPeaksImage(double** image, double thres)
  * thres: threshold value for magnitude
 */
 {
-    // Add your code here
+  // Add your code here. Should look like black circles with white edges.
 }
 
 /**************************************************
