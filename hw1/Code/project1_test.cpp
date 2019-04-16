@@ -15,6 +15,7 @@ private slots:
   void TestSecondDerivImage();
   void TestSharpenImage();
   void TestSobelImage();
+  void TestRotateImage();
 };
 
 namespace {
@@ -160,7 +161,7 @@ void Project1Test::TestSharpenImage() {
 }
 
 void Project1Test::TestSobelImage() {
-    TestWindow window;
+  TestWindow window;
   window.imageHeight = 4;
   window.imageWidth = 3;
 
@@ -174,6 +175,20 @@ void Project1Test::TestSobelImage() {
   QCOMPARE(image[10][0], 44.4555115728856194);
   QCOMPARE(image[10][1], 26.9555115728856158);
   QCOMPARE(image[10][2], -26.4999999999999964);
+}
+
+
+void Project1Test::TestRotateImage() {
+  TestWindow window;
+  window.imageHeight = 4;
+  window.imageWidth = 3;
+
+  double **image = new double*[12]{
+    new double[3]{1, 2, 3}, new double[3]{4, 5, 6}, new double[3]{7, 8, 9},
+    new double[3]{10, 11, 12}, new double[3]{13, 14, 15}, new double[3]{16, 17, 18},
+    new double[3]{19, 20, 21}, new double[3]{22, 23, 24}, new double[3]{25, 26, 27},
+    new double[3]{28, 29, 30}, new double[3]{31, 32, 33}, new double[3]{34, 35, 36}};
+  window.RotateImage(image, 20);
 }
 
 QTEST_MAIN(Project1Test)

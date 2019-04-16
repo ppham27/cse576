@@ -439,7 +439,35 @@ void MainWindow::BilinearInterpolation(double** image, double x, double y, doubl
  * rgb[3]: array where the computed RGB values are to be stored
 */
 {
-    // Add your code here
+  int x1 = static_cast<int>(floor(x)), x2 = static_cast<int>(ceil(x));
+  int y1 = static_cast<int>(floor(y)), y2 = static_cast<int>(ceil(y));
+  // Out of bounds.
+  if (x1 < 0 || y1 < 0 || x2 >= imageWidth || y2 >= imageHeight) {
+    rgb[0] = rgb[1] = rgb[2] = 0;
+    return;
+  }
+  // Account for various cases where denominator might be 0.
+  if (x1 == x2 && y1 == y2) {
+    std::memcpy(rgb, image[imageWidth*y1 + x1], 3*sizeof(double));
+    return;
+  }
+  if (y1 == y2) {
+    for (int c = 0; c < 3; ++c)
+      rgb[c] = (image[imageWidth*y1 + x1][c]*(x2 - x) + image[imageWidth*y1 + x2][c]*(x-x1))/(x2-x1);
+    return;
+  }
+  if (x1 == x2) {
+    for (int c = 0; c < 3; ++c)
+      rgb[c] = (image[imageWidth*y1 + x1][c]*(y2 - y) + image[imageWidth*y2 + x1][c]*(y-y1))/(y2-y1);
+    return;
+  }
+  // General case.
+  for (int c = 0; c < 3; ++c) {
+    rgb[c] = (image[imageWidth*y1 + x1][c]*(x2-x)*(y2-y) +
+              image[imageWidth*y1 + x2][c]*(x-x1)*(y2-y) +
+              image[imageWidth*y2 + x1][c]*(x2-x)*(y-y1) +
+              image[imageWidth*y2 + x2][c]*(x-x1)*(y-y1))/(x2-x1)/(y2-y1);
+  }
 }
 
 /*******************************************************************************
