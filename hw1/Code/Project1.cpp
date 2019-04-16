@@ -526,7 +526,38 @@ void MainWindow::FindPeaksImage(double** image, double thres)
  * thres: threshold value for magnitude
 */
 {
-  // Add your code here. Should look like black circles with white edges.
+  // First apply Sobel edge detector to get magnitudes and orientations.
+  double** sobel = new double*[imageWidth*imageHeight];
+  for (int i = 0; i < imageWidth*imageHeight; ++i) {
+    sobel[i] = new double[3];
+    std::memcpy(sobel[i], image[i], 3*sizeof(double));
+  }
+  SobelImage(sobel);
+  for (int i = 0; i < imageWidth*imageHeight; ++i) {
+    // Reverse engineer Sobel calculation to restore magnitude.
+    sobel[i][2] += sobel[i][0] + sobel[i][1]; sobel[i][2] *= 2;
+  }
+  // Using magnitudes and peaks to find orientation.
+  for (int i = 0; i < imageWidth*imageHeight; ++i) {
+    // Zero out pixels that aren't peaks and pixels with edge magnitudes less than threshold.
+    image[i][0] = image[i][1] = image[i][2] = 0;
+    if (sobel[i][2] <= thres) continue;
+    // Reverse engineer Sobel calculation to obtain sine and cosine of orientation.
+    double sin_theta = 4*sobel[i][0]/sobel[i][2] - 1;
+    double cos_theta = 4*sobel[i][1]/sobel[i][2] - 1;
+    // Calculate edge magnitudes with interpolation.
+    int r = i / imageWidth, c = i % imageWidth;
+    double rgb[3];
+    BilinearInterpolation(sobel, c + cos_theta, r + sin_theta, rgb);
+    double magnitude_e1 = rgb[2];
+    BilinearInterpolation(sobel, c - cos_theta, r - sin_theta, rgb);
+    double magnitude_e2 = rgb[2];
+    // Whiten peak respone pixels.
+    if (sobel[i][2] >= magnitude_e1 && sobel[i][2] >= magnitude_e2)
+      image[i][0] = image[i][1] = image[i][2] = 255;
+  }
+  for (int i = 0; i < imageWidth*imageHeight; ++i) delete[] sobel[i];
+  delete[] sobel;
 }
 
 /**************************************************
