@@ -17,6 +17,8 @@ private slots:
   void TestSobelImage();
   void TestRotateImage();
   void TestFindPeaksImage();
+  void TestRandomSeedImage();
+  void TestPixelSeedImage();
 };
 
 namespace {
@@ -203,6 +205,31 @@ void Project1Test::TestFindPeaksImage() {
     new double[3]{19, 20, 21}, new double[3]{22, 23, 24}, new double[3]{25, 26, 27},
     new double[3]{28, 29, 30}, new double[3]{31, 32, 33}, new double[3]{34, 35, 36}};
   window.FindPeaksImage(image, 40.0);
+}
+
+void Project1Test::TestRandomSeedImage() {
+  TestWindow window;
+  window.imageHeight = 4;
+  window.imageWidth = 3;
+
+  double **image = new double*[12]{
+    new double[3]{1, 2, 3}, new double[3]{4, 5, 6}, new double[3]{7, 8, 9},
+    new double[3]{10, 11, 12}, new double[3]{13, 14, 15}, new double[3]{16, 17, 18},
+    new double[3]{19, 20, 21}, new double[3]{22, 23, 24}, new double[3]{25, 26, 27},
+    new double[3]{28, 29, 30}, new double[3]{31, 32, 33}, new double[3]{34, 35, 36}};
+  window.RandomSeedImage(image, 4);
+}
+void Project1Test::TestPixelSeedImage() {
+  TestWindow window;
+  window.imageHeight = 4;
+  window.imageWidth = 3;
+
+  double **image = new double*[12]{
+    new double[3]{1, 2, 3}, new double[3]{4, 5, 6}, new double[3]{7, 8, 9},
+    new double[3]{10, 11, 12}, new double[3]{13, 14, 15}, new double[3]{16, 17, 18},
+    new double[3]{19, 20, 21}, new double[3]{22, 23, 24}, new double[3]{25, 26, 27},
+    new double[3]{28, 29, 30}, new double[3]{31, 32, 33}, new double[3]{34, 35, 36}};
+  window.PixelSeedImage(image, 50);
 }
 
 QTEST_MAIN(Project1Test)

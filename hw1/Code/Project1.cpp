@@ -1,8 +1,13 @@
 #include <algorithm>
+#include <array>
 #include <cmath>
 #include <cstring>
-#include <QtGui>
+#include <limits>
+#include <random>
 #include <string>
+#include <utility>
+#include <vector>
+#include <QtGui>
 
 #include "mainwindow.h"
 #include "math.h"
@@ -564,14 +569,66 @@ void MainWindow::FindPeaksImage(double** image, double thres)
  TASK 9 (a)
 **************************************************/
 
+namespace {
+  void KMeans(double** clusters, const int num_clusters,
+              double** image, const int imageWidth, const int imageHeight) {
+    int* cluster_assignments = new int[imageWidth*imageHeight];
+    int iteration = 0, max_iterations = 100;
+    long long total_distance_delta = std::numeric_limits<long long>::max(),
+      previous_total_distance = std::numeric_limits<long long>::max(), epsilon = 30;
+    while (++iteration <= max_iterations && total_distance_delta >= epsilon*num_clusters) {
+      // Accumulate new clusters.
+      std::vector<std::array<double, 3>> new_clusters(num_clusters);
+      for (int k = 0; k < num_clusters; ++k) new_clusters[k].fill(0);
+      std::vector<int> cluster_count(num_clusters, 0);
+      // Assign clusters and Keep track of sum of pixel minimum distance to a cluster center.
+      long long total_distance = 0;
+      for (int i = 0; i < imageWidth*imageHeight; ++i) {
+        int min_distance = std::numeric_limits<int>::max(), cluster = -1;
+        for (int k = 0; k < num_clusters; ++k) {
+          int distance = 0;
+          for (int c = 0; c < 3; ++c) distance += std::abs(image[i][c] - clusters[k][c]);
+          if (distance < min_distance) min_distance = distance, cluster = k;
+        }
+        Q_ASSERT_X(cluster > -1, "kmeans", "No closest cluster was found.");
+        cluster_assignments[i] = cluster;
+        ++cluster_count[cluster];
+        for (int c = 0; c < 3; ++c) new_clusters[cluster][c] += image[i][c];
+        total_distance += min_distance;
+      }
+      // Update clusters with new means.
+      for (int k = 0; k < num_clusters; ++k)
+        if (cluster_count[k] > 0)
+          for (int c = 0; c < 3; ++c) clusters[k][c] = new_clusters[k][c]/cluster_count[k];
+      total_distance_delta = std::abs(previous_total_distance - total_distance);
+      previous_total_distance = total_distance;
+    }
+
+    for (int i = 0; i < imageWidth*imageHeight; ++i)
+      std::memcpy(image[i], clusters[cluster_assignments[i]], 3*sizeof(double));
+  }
+}
+
 // Perform K-means clustering on a color image using random seeds
 void MainWindow::RandomSeedImage(double** image, int num_clusters)
 /*
  * image: input image in matrix form of size (imageWidth*imageHeight)*3 having double values
  * num_clusters: number of clusters into which the image is to be clustered
 */
-{
-    // Add your code here
+{  
+  std::mt19937_64 generator((std::random_device())());
+  std::uniform_int_distribution<double> pixel_dist(0, 255);
+
+  double** clusters = new double*[num_clusters];
+  for (int k = 0; k < num_clusters; ++k) {
+    clusters[k] = new double[3]{
+      pixel_dist(generator), pixel_dist(generator), pixel_dist(generator)};
+  }
+
+  KMeans(clusters, num_clusters, image, imageWidth, imageHeight);
+
+  for (int k = 0; k < num_clusters; ++k) delete[] clusters[k];
+  delete[] clusters;
 }
 
 /**************************************************
@@ -585,7 +642,23 @@ void MainWindow::PixelSeedImage(double** image, int num_clusters)
  * num_clusters: number of clusters into which the image is to be clustered
 */
 {
-    // Add your code here
+  std::vector<int> pixel_indices; pixel_indices.reserve(imageWidth*imageHeight);
+  for (int i = 0; i < imageWidth*imageHeight; ++i) pixel_indices.push_back(i);
+
+  std::mt19937_64 generator((std::random_device())());
+  std::shuffle(pixel_indices.begin(), pixel_indices.end(), generator);
+
+  num_clusters = std::min(num_clusters, static_cast<int>(pixel_indices.size()));
+  double** clusters = new double*[num_clusters];
+  for (int k = 0; k < num_clusters; ++k) {
+    clusters[k] = new double[3];
+    std::memcpy(clusters[k], image[pixel_indices[k]], 3*sizeof(double));
+  }
+
+  KMeans(clusters, num_clusters, image, imageWidth, imageHeight);
+
+  for (int k = 0; k < num_clusters; ++k) delete[] clusters[k];
+  delete[] clusters;
 }
 
 
