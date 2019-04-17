@@ -606,6 +606,8 @@ namespace {
 
     for (int i = 0; i < imageWidth*imageHeight; ++i)
       std::memcpy(image[i], clusters[cluster_assignments[i]], 3*sizeof(double));
+
+    delete[] cluster_assignments;
   }
 }
 
