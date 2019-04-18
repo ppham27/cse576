@@ -597,8 +597,8 @@ void MainWindow::FindPeaksImage(double** image, double thres)
 **************************************************/
 
 namespace {
-  void KMeans(double** clusters, const int num_clusters,
-              double** image, const int imageWidth, const int imageHeight) {
+  void KMeans(double* const* clusters, int num_clusters,
+              double* const* image, int imageWidth, int imageHeight) {
     int* cluster_assignments = new int[imageWidth*imageHeight];
     int iteration = 0, max_iterations = 100;
     long long total_distance_delta = std::numeric_limits<long long>::max(),
