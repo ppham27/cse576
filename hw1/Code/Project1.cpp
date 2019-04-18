@@ -217,7 +217,7 @@ namespace {
     kReflected = 1,
   };
 
-  void MakePaddedBuffer(double** const image, int imageWidth, int imageHeight,
+  void MakePaddedBuffer(const double* const* image, int imageWidth, int imageHeight,
                         int kernelWidth, int kernelHeight, PaddingScheme paddingScheme,
                         double*** imageBuffer, int* imageBufferWidth, int* imageBufferHeight) {
     // Buffer image. If kernel is even-sized add extra pixel to top and left.
