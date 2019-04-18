@@ -198,6 +198,9 @@ void MainWindow::ConvertDouble2QImage(QImage *image)
     for (int r = 0; r < imageHeight; r++)
         for (int c = 0; c < imageWidth; c++)
             image->setPixel(c, r, restrictColor(Image[r*imageWidth+c][0], Image[r*imageWidth+c][1], Image[r*imageWidth+c][2]));
+
+    for (int i = 0; i < imageWidth*imageHeight; ++i) delete[] Image[i];
+    delete[] Image;
 }
 
 
@@ -208,6 +211,51 @@ void MainWindow::ConvertDouble2QImage(QImage *image)
 /**************************************************
  TASK 1
 **************************************************/
+namespace {
+  enum PaddingScheme {
+    kZero = 0,
+    kReflected = 1,
+  };
+
+  void MakePaddedBuffer(double** const image, int imageWidth, int imageHeight,
+                        int kernelWidth, int kernelHeight, PaddingScheme paddingScheme,
+                        double*** imageBuffer, int* imageBufferWidth, int* imageBufferHeight) {
+    // Buffer image. If kernel is even-sized add extra pixel to top and left.
+    int padding[4] = {/*top=*/kernelHeight/2,
+                      /*right=*/(kernelWidth - 1)/2,
+                      /*bottom=*/(kernelHeight - 1)/2,
+                      /*left=*/kernelWidth/2};
+    *imageBufferWidth = padding[1] + imageWidth + padding[3];
+    *imageBufferHeight = padding[0] + imageHeight + padding[2];
+    *imageBuffer = new double*[(*imageBufferWidth) * (*imageBufferHeight)];
+    for (int i = 0; i < *imageBufferWidth; ++i) {
+      for (int j = 0; j < *imageBufferHeight; ++j) {
+        if (i < padding[3] || i >= imageWidth + padding[3] ||
+            j < padding[0] || j >= imageHeight + padding[0]) {
+          (*imageBuffer)[j * (*imageBufferWidth) + i] = new double[3]{0, 0, 0};
+          // Alternative padding schemes.
+          if (paddingScheme == PaddingScheme::kReflected) {
+            int k = i < padding[3] ? padding[3] - i :  // Left.
+              i >= imageWidth + padding[3] ? 2*imageWidth + padding[3] - i - 1 :  // Right.
+              i - padding[3];  // In range.
+            k = std::min(std::max(0, k), imageWidth - 1);
+            int l = j < padding[0] ? padding[0] - j :  // Above.
+              j >= imageHeight + padding[0] ? 2*imageHeight + padding[0] - j - 1 :  // Below.
+              j - padding[0];  // In range.
+            l = std::min(std::max(0, l), imageHeight - 1);
+            std::memcpy((*imageBuffer)[j * (*imageBufferWidth) + i], image[l*imageWidth + k],
+                        3*sizeof(double));
+          }
+        } else {
+          (*imageBuffer)[j * (*imageBufferWidth) + i] = new double[3];
+          std::memcpy((*imageBuffer)[j * (*imageBufferWidth) + i],
+                      image[(j - padding[0])*imageWidth + (i - padding[3])],
+                      3*sizeof(double));
+        }
+      }
+    }    
+  }
+}  // namespace
 
 // Convolve the image with the kernel
 void MainWindow::Convolution(double** image, double *kernel, int kernelWidth, int kernelHeight, bool add)
@@ -219,31 +267,14 @@ void MainWindow::Convolution(double** image, double *kernel, int kernelWidth, in
  * add: a boolean variable (taking values true or false)
 */
 {
-  Q_ASSERT_X(kernelWidth > 0 && kernelWidth % 2 == 1,
-             "convolution", "kernel width must be positive and odd");
-  Q_ASSERT_X(kernelHeight > 0 && kernelHeight % 2 == 1,
-             "convolution", "kernel height must be positive and odd.");
-  // Buffer image.
-  int padding[4] = {/*top=*/kernelHeight/2,
-                    /*right=*/(kernelWidth - 1)/2,
-                    /*bottom=*/(kernelHeight - 1)/2,
-                    /*left=*/kernelWidth/2};
-  int imageBufferWidth = padding[1] + imageWidth + padding[3];
-  int imageBufferHeight = padding[0] + imageHeight + padding[2];
-  double **imageBuffer = new double*[imageBufferWidth*imageBufferHeight];
-  for (int i = 0; i < imageBufferWidth; ++i) {
-    for (int j = 0; j < imageBufferHeight; ++j) {
-      if (i < padding[1] || i >= imageWidth + padding[1] ||
-          j < padding[0] || j >= imageHeight + padding[0]) {
-        imageBuffer[j*imageBufferWidth + i] = new double[3]{0, 0, 0};
-      } else {
-        imageBuffer[j*imageBufferWidth + i] = new double[3];
-        std::memcpy(imageBuffer[j*imageBufferWidth + i],
-                    image[(j - padding[0])*imageWidth + (i - padding[3])],
-                    3*sizeof(double));
-      }      
-    }
-  }
+  Q_ASSERT_X(kernelWidth > 0, "convolution", "kernel width must be positive.");
+  Q_ASSERT_X(kernelHeight > 0, "convolution", "kernel height must be positive.");
+  // Allocate buffer with zero padding. Reflected padding can specified with paddingScheme.
+  double **imageBuffer;
+  int imageBufferWidth, imageBufferHeight;
+  ::MakePaddedBuffer(image, imageWidth, imageHeight, kernelWidth, kernelHeight,
+                     PaddingScheme::kZero,  // Change to kReflected for reflected padding.
+                     &imageBuffer, &imageBufferWidth, &imageBufferHeight);
   // Convolve image.
   for (int i = 0; i < imageWidth; ++i) {
     for (int j = 0; j < imageHeight; ++j) {
@@ -480,43 +511,39 @@ void MainWindow::BilinearInterpolation(double** image, double x, double y, doubl
 ********************************************************************************/
 
 // Rotating an image by "orien" degrees
-void MainWindow::RotateImage(double** image, double orien)
+void MainWindow::RotateImage(double** image, double orien) {
+  double radians = -2.0*3.141*orien/360.0;
 
-{
-    double radians = -2.0*3.141*orien/360.0;
+  // Make a copy of the original image and then re-initialize the original image with 0
+  double** buffer = new double* [imageWidth*imageHeight];
+  for (int i = 0; i < imageWidth*imageHeight; i++) {
+    buffer[i] = new double [3];
+    std::memcpy(buffer[i], image[i], 3*sizeof(double));
+    std::fill_n(image[i], 3, 0);  // re-initialize to 0.
+  }
 
-    // Make a copy of the original image and then re-initialize the original image with 0
-    double** buffer = new double* [imageWidth*imageHeight];
-    for (int i = 0; i < imageWidth*imageHeight; i++)
-    {
-        buffer[i] = new double [3];
-        for(int j = 0; j < 3; j++)
-            buffer[i][j] = image[i][j];
-        image[i] = new double [3](); // re-initialize to 0
+  for (int r = 0; r < imageHeight; r++)
+    for (int c = 0; c < imageWidth; c++) {
+      // Rotate around the center of the image
+      double x0 = (double) (c - imageWidth/2);
+      double y0 = (double) (r - imageHeight/2);
+      // Rotate using rotation matrix
+      double x1 = x0*cos(radians) - y0*sin(radians);
+      double y1 = x0*sin(radians) + y0*cos(radians);
+      x1 += (double) (imageWidth/2);
+      y1 += (double) (imageHeight/2);
+
+      double rgb[3];
+      BilinearInterpolation(buffer, x1, y1, rgb);
+
+      // Note: "image[r*imageWidth+c] = rgb" merely copies the head pointers of the arrays, not the values
+      image[r*imageWidth+c][0] = rgb[0];
+      image[r*imageWidth+c][1] = rgb[1];
+      image[r*imageWidth+c][2] = rgb[2];
     }
-
-    for (int r = 0; r < imageHeight; r++)
-       for (int c = 0; c < imageWidth; c++)
-       {
-            // Rotate around the center of the image
-            double x0 = (double) (c - imageWidth/2);
-            double y0 = (double) (r - imageHeight/2);
-
-            // Rotate using rotation matrix
-            double x1 = x0*cos(radians) - y0*sin(radians);
-            double y1 = x0*sin(radians) + y0*cos(radians);
-
-            x1 += (double) (imageWidth/2);
-            y1 += (double) (imageHeight/2);
-
-            double rgb[3];
-            BilinearInterpolation(buffer, x1, y1, rgb);
-
-            // Note: "image[r*imageWidth+c] = rgb" merely copies the head pointers of the arrays, not the values
-            image[r*imageWidth+c][0] = rgb[0];
-            image[r*imageWidth+c][1] = rgb[1];
-            image[r*imageWidth+c][2] = rgb[2];
-        }
+    
+  for (int i = 0; i < imageWidth*imageHeight; ++i) delete[] buffer[i];
+  delete[] buffer;
 }
 
 /**************************************************
@@ -609,7 +636,7 @@ namespace {
 
     delete[] cluster_assignments;
   }
-}
+}  // namespace
 
 // Perform K-means clustering on a color image using random seeds
 void MainWindow::RandomSeedImage(double** image, int num_clusters)
