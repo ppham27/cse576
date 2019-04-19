@@ -2,7 +2,9 @@
 #include <array>
 #include <cmath>
 #include <cstring>
+#include <functional>
 #include <limits>
+#include <memory>
 #include <random>
 #include <string>
 #include <utility>
@@ -213,10 +215,12 @@ void MainWindow::ConvertDouble2QImage(QImage *image)
 **************************************************/
 namespace {
   enum PaddingScheme {
-    kZero = 0,
-    kReflected = 1,
+    kZero = 0,  // Pad with all zeros.
+    kReflected = 1,  // Pad by reflecting across image border.
   };
 
+  // Copies the `image` into `imageBuffer` and adds padding based on kernel
+  // dimensions and `paddingScheme`.
   void MakePaddedBuffer(const double* const* image, int imageWidth, int imageHeight,
                         int kernelWidth, int kernelHeight, PaddingScheme paddingScheme,
                         double*** imageBuffer, int* imageBufferWidth, int* imageBufferHeight) {
@@ -255,6 +259,65 @@ namespace {
       }
     }    
   }
+
+  // A local neighborhood of an image.
+  class ImageWindow {
+  public:
+    explicit ImageWindow(const double* const* image, int imageWidth, int channel,
+                         const std::pair<int, int> origin, int width, int height) :
+      channel_(channel),
+      image_(image),
+      imageWidth_(imageWidth),
+      origin_(origin),
+      width(width),                                        
+      height(height) {}
+
+    const int width;
+    const int height;
+
+    double operator()(int i, int j) const {
+      Q_ASSERT_X(0 <= i && i < width, 'ImageWindow', 'Column is out of range.');
+      Q_ASSERT_X(0 <= j && j < height, 'ImageWindow', 'Height is out of range.');
+      int x = origin_.first + i, y = origin_.second + j;      
+      return image_[y*imageWidth_ + x][channel_];
+    }
+
+  private:
+    const int channel_;
+    const int imageWidth_;
+    const std::pair<int, int> origin_;
+    const double* const* image_;
+  };
+
+  // Creates localized windows of an image.
+  class ImageWindowFactory {
+  public:
+    explicit ImageWindowFactory(const double* const* image, int imageWidth,
+                                int width, int height) : image_(image),
+                                                         imageWidth_(imageWidth),
+                                                         width_(width),
+                                                         height_(height) {}
+
+    ImageWindow operator()(std::pair<int, int> origin, int channel) const {
+      return ImageWindow(image_, imageWidth_, channel, origin, width_, height_);
+    }
+
+  private:
+    const double* const* image_;
+    const int imageWidth_;
+    const int width_;
+    const int height_;    
+  };
+
+  // Applies a function to multiple windows and stores the result in `image`.
+  void Convolve(const ::ImageWindowFactory& factory,
+                std::function<double(const ::ImageWindow&)> window_fn,
+                double* const* image, int imageWidth, int imageHeight) {
+    for (int i = 0; i < imageWidth; ++i)
+      for (int j = 0; j < imageHeight; ++j)
+        for (int c = 0; c < 3; ++c)
+          image[j*imageWidth + i][c] = window_fn(factory(std::make_pair(i, j), c));
+  }
 }  // namespace
 
 // Convolve the image with the kernel
@@ -269,28 +332,24 @@ void MainWindow::Convolution(double** image, double *kernel, int kernelWidth, in
 {
   Q_ASSERT_X(kernelWidth > 0, "convolution", "kernel width must be positive.");
   Q_ASSERT_X(kernelHeight > 0, "convolution", "kernel height must be positive.");
-  // Allocate buffer with zero padding. Reflected padding can specified with paddingScheme.
+  // Allocate buffer with zero padding. Reflected padding can be specified by
+  // setting paddingScheme to PaddingScheme::kReflected.
   double **imageBuffer;
   int imageBufferWidth, imageBufferHeight;
   ::MakePaddedBuffer(image, imageWidth, imageHeight, kernelWidth, kernelHeight,
                      PaddingScheme::kZero,  // Change to kReflected for reflected padding.
                      &imageBuffer, &imageBufferWidth, &imageBufferHeight);
-  // Convolve image.
-  for (int i = 0; i < imageWidth; ++i) {
-    for (int j = 0; j < imageHeight; ++j) {
-      for (int c = 0; c < 3; ++c) {
-        image[j*imageWidth + i][c] = add ? 128 : 0;
-        for (int k = 0; k < kernelWidth; ++k) {
-          int x = i + k;
-          for (int l = 0; l < kernelHeight; ++l) {
-            int y = j + l;
-            image[j*imageWidth + i][c] +=
-              kernel[l*kernelWidth + k]*imageBuffer[y*imageBufferWidth + x][c];
-          }
-        }
-      }
-    }
-  }
+
+  std::function<double(const ::ImageWindow&)> applyKernel = [add, kernel](const ::ImageWindow& w) -> double {
+    double res = add ? 128 : 0;
+    for (int i = 0; i < w.width; ++i)
+      for (int j = 0; j < w.height; ++j)
+        res += kernel[j*w.width + i]*w(i, j);
+    return res;
+  };
+
+  Convolve(::ImageWindowFactory(imageBuffer, imageBufferWidth, kernelWidth, kernelHeight),
+           std::move(applyKernel), image, imageWidth, imageHeight);
   // Clean up.
   for (int i = 0; i < imageBufferWidth * imageBufferHeight; ++i) delete[] imageBuffer[i];
   delete[] imageBuffer;
