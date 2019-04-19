@@ -348,8 +348,8 @@ void MainWindow::Convolution(double** image, double *kernel, int kernelWidth, in
     return res;
   };
 
-  Convolve(::ImageWindowFactory(imageBuffer, imageBufferWidth, kernelWidth, kernelHeight),
-           std::move(applyKernel), image, imageWidth, imageHeight);
+  ::Convolve(::ImageWindowFactory(imageBuffer, imageBufferWidth, kernelWidth, kernelHeight),
+             std::move(applyKernel), image, imageWidth, imageHeight);
   // Clean up.
   for (int i = 0; i < imageBufferWidth * imageBufferHeight; ++i) delete[] imageBuffer[i];
   delete[] imageBuffer;
@@ -771,7 +771,28 @@ void MainWindow::MedianImage(double** image, int radius)
  * radius: radius of the kernel
 */
 {
-    // Add your code here
+  int size = 2*radius + 1;  // Kernel size.
+
+  int imageBufferWidth, imageBufferHeight;
+  double** imageBuffer;
+  ::MakePaddedBuffer(image, imageWidth, imageHeight, size, size,
+                     PaddingScheme::kReflected,
+                     &imageBuffer, &imageBufferWidth, &imageBufferHeight);
+
+  std::function<double(const ::ImageWindow&)> findMedian = [](const ::ImageWindow& w) -> double {
+    const int size = w.width*w.height; Q_ASSERT(size > 0);
+    std::vector<double> pixels; pixels.reserve(size);    
+    for (int i = 0; i < w.width; ++i) for (int j = 0; j < w.height; ++j) pixels.push_back(w(i, j));
+    std::nth_element(pixels.begin(), pixels.begin() + size/2, pixels.end());
+    if (size % 2 == 1) return pixels[size/2];
+    return (*std::max_element(pixels.begin(), pixels.begin() + size/2) + pixels[size/2])/2.0;
+  };
+
+  ::Convolve(::ImageWindowFactory(imageBuffer, imageBufferWidth, size, size),
+             std::move(findMedian), image, imageWidth, imageHeight);
+  // Clean up.
+  for (int i = 0; i < imageBufferWidth * imageBufferHeight; ++i) delete[] imageBuffer[i];
+  delete[] imageBuffer;
 }
 
 // Apply Bilater filter on an image

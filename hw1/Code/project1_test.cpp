@@ -19,6 +19,7 @@ private slots:
   void TestFindPeaksImage();
   void TestRandomSeedImage();
   void TestPixelSeedImage();
+  void TestMedianImage();
 };
 
 namespace {
@@ -219,6 +220,7 @@ void Project1Test::TestRandomSeedImage() {
     new double[3]{28, 29, 30}, new double[3]{31, 32, 33}, new double[3]{34, 35, 36}};
   window.RandomSeedImage(image, 4);
 }
+
 void Project1Test::TestPixelSeedImage() {
   TestWindow window;
   window.imageHeight = 4;
@@ -230,6 +232,27 @@ void Project1Test::TestPixelSeedImage() {
     new double[3]{19, 20, 21}, new double[3]{22, 23, 24}, new double[3]{25, 26, 27},
     new double[3]{28, 29, 30}, new double[3]{31, 32, 33}, new double[3]{34, 35, 36}};
   window.PixelSeedImage(image, 50);
+}
+
+void Project1Test::TestMedianImage() {
+  TestWindow window;
+  window.imageHeight = 4;
+  window.imageWidth = 3;
+
+  double **image = new double*[12]{
+    new double[3]{1, 2, 3}, new double[3]{4, 5, 6}, new double[3]{7, 8, 9},
+    new double[3]{10, 11, 12}, new double[3]{13, 14, 15}, new double[3]{16, 17, 18},
+    new double[3]{19, 20, 21}, new double[3]{22, 23, 24}, new double[3]{25, 26, 27},
+    new double[3]{28, 29, 30}, new double[3]{31, 32, 33}, new double[3]{34, 35, 36}};
+  window.MedianImage(image, 2);
+
+  QCOMPARE(image[3][0], 16);
+  QCOMPARE(image[3][1], 17);
+  QCOMPARE(image[3][2], 18);
+
+  QCOMPARE(image[10][0], 25);
+  QCOMPARE(image[10][1], 26);
+  QCOMPARE(image[10][2], 27);
 }
 
 QTEST_MAIN(Project1Test)
