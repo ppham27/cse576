@@ -385,7 +385,7 @@ void MainWindow::GaussianBlurImage(double** image, double sigma)
   for (int i = 0; i < size; ++i) {
     for (int j = 0; j < size; ++j) {
       int r = i - radius, c = j - radius;
-      kernel[j*size + i] = exp(-(r*r + c*c)/(2*sigma2))/(2*M_PI*sigma2);
+      kernel[j*size + i] = std::exp(-(r*r + c*c)/(2*sigma2))/(2*M_PI*sigma2);
     }
   }
   NormalizeKernel(kernel, size, size);
@@ -410,7 +410,7 @@ void MainWindow::SeparableGaussianBlurImage(double** image, double sigma)
   double* kernel = new double[size];
   for (int i = 0; i < size; ++i) {
     int x = i - radius;
-    kernel[i] = exp(-(x*x)/(2*sigma2))/(sigma*sqrt(2*M_PI));
+    kernel[i] = std::exp(-(x*x)/(2*sigma2))/(sigma*std::sqrt(2*M_PI));
   }
   NormalizeKernel(kernel, size, 1);
   Convolution(image, kernel, size, 1, false);
@@ -514,13 +514,13 @@ void MainWindow::SobelImage(double** image)
   Convolution(imageY, kernelY, 3, 3, false);
   for (int i = 0; i < imageWidth*imageHeight; ++i) {
     // Divide magnitude by 8 to avoid spurious edges.
-    double magnitude = sqrt(imageX[i][0]*imageX[i][0] + imageY[i][0]*imageY[i][0])/8;
-    double orientation = atan2(imageY[i][0], imageX[i][0]);
+    double magnitude = std::sqrt(imageX[i][0]*imageX[i][0] + imageY[i][0]*imageY[i][0])/8;
+    double orientation = std::atan2(imageY[i][0], imageX[i][0]);
     // The following 3 lines of code to set the image pixel values after
     // computing magnitude and orientation (sin(orien) + 1)/2 converts the sine
     // value to the range [0,1]. Similarly for cosine.
-    image[i][0] = magnitude*4.0*(sin(orientation) + 1.0)/2.0;
-    image[i][1] = magnitude*4.0*(cos(orientation) + 1.0)/2.0;
+    image[i][0] = magnitude*4.0*(std::sin(orientation) + 1.0)/2.0;
+    image[i][1] = magnitude*4.0*(std::cos(orientation) + 1.0)/2.0;
     image[i][2] = magnitude*4.0 - image[i][0] - image[i][1];
   }
 
@@ -834,17 +834,34 @@ void MainWindow::BilateralImage(double** image, double sigmaS, double sigmaI)
  * sigmaI: standard deviation in the intensity/range domain
 */
 {
-  std::function<double(const ::ImageWindow&)> filter = [](const ::ImageWindow& w) -> double {
-    return 0;
-  };
-
   int radius = static_cast<int>(3 * std::ceil(std::max(sigmaS, sigmaI)));  
   int kernelSize = 2*radius + 1;
+  // Pre-allocate memory for efficiency;
+  double* kernel = new double[kernelSize*kernelSize];
+  std::function<double(const ::ImageWindow&)> filter = [sigmaS, sigmaI, kernel](const ::ImageWindow& w) -> double {
+    // Construct kernel based on neighboring pixel intensities.
+    for (int i = 0; i < w.width; ++i) {
+      for (int j = 0; j < w.height; ++j) {
+        int x = i - w.width/2, y = j - w.height/2;
+        double intensityDelta = w(i, j) - w(w.width/2, w.height/2);
+        kernel[j*w.width + i] = std::exp(-(x*x + y*y)/(2*sigmaS*sigmaS) -
+                                         intensityDelta*intensityDelta/(2*sigmaI*sigmaI));
+      }
+    }
+    NormalizeKernel(kernel, w.width, w.height);
+    // Apply kernel to get result.
+    double result = 0;
+    for (int i = 0; i < w.width; ++i)
+      for (int j = 0; j < w.height; ++j)
+        result += kernel[j*w.width + i]*w(i, j);
+    return result;
+  };
 
   ::PadAndConvolve(kernelSize, kernelSize,
                    ::PaddingScheme::kReflected,
                    std::move(filter),
                    image, imageWidth, imageHeight);
+  delete[] kernel;
 }
 
 namespace {
