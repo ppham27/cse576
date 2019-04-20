@@ -4,11 +4,13 @@
 #include <cstring>
 #include <functional>
 #include <limits>
+#include <map>
 #include <memory>
+#include <queue>
 #include <random>
 #include <string>
 #include <utility>
-#include <vector>
+#include <map>
 #include <QtGui>
 
 #include "mainwindow.h"
@@ -276,8 +278,8 @@ namespace {
     const int height;
 
     double operator()(int i, int j) const {
-      Q_ASSERT_X(0 <= i && i < width, 'ImageWindow', 'Column is out of range.');
-      Q_ASSERT_X(0 <= j && j < height, 'ImageWindow', 'Height is out of range.');
+      Q_ASSERT_X(0 <= i && i < width, "ImageWindow", "Column is out of range.");
+      Q_ASSERT_X(0 <= j && j < height, "ImageWindow", "Height is out of range.");
       int x = origin_.first + i, y = origin_.second + j;      
       return image_[y*imageWidth_ + x][channel_];
     }
@@ -318,6 +320,25 @@ namespace {
         for (int c = 0; c < 3; ++c)
           image[j*imageWidth + i][c] = window_fn(factory(std::make_pair(i, j), c));
   }
+
+  // Convolves in a general way that doesn't require a linear kernel.
+  void PadAndConvolve(int kernelWidth, int kernelHeight, PaddingScheme paddingScheme,
+                      std::function<double(const ::ImageWindow&)> window_fn,
+                      double* const* image, int imageWidth, int imageHeight) {
+    Q_ASSERT_X(kernelWidth > 0, "convolution", "kernel width must be positive.");
+    Q_ASSERT_X(kernelHeight > 0, "convolution", "kernel height must be positive.");
+    // Padding step.
+    double **imageBuffer;
+    int imageBufferWidth, imageBufferHeight;
+    ::MakePaddedBuffer(image, imageWidth, imageHeight, kernelWidth, kernelHeight, paddingScheme,
+                       &imageBuffer, &imageBufferWidth, &imageBufferHeight);
+    // Convolve step.
+    ::Convolve(::ImageWindowFactory(imageBuffer, imageBufferWidth, kernelWidth, kernelHeight),
+               std::move(window_fn), image, imageWidth, imageHeight);
+    // Clean up.
+    for (int i = 0; i < imageBufferWidth * imageBufferHeight; ++i) delete[] imageBuffer[i];
+    delete[] imageBuffer;    
+  }
 }  // namespace
 
 // Convolve the image with the kernel
@@ -330,16 +351,6 @@ void MainWindow::Convolution(double** image, double *kernel, int kernelWidth, in
  * add: a boolean variable (taking values true or false)
 */
 {
-  Q_ASSERT_X(kernelWidth > 0, "convolution", "kernel width must be positive.");
-  Q_ASSERT_X(kernelHeight > 0, "convolution", "kernel height must be positive.");
-  // Allocate buffer with zero padding. Reflected padding can be specified by
-  // setting paddingScheme to PaddingScheme::kReflected.
-  double **imageBuffer;
-  int imageBufferWidth, imageBufferHeight;
-  ::MakePaddedBuffer(image, imageWidth, imageHeight, kernelWidth, kernelHeight,
-                     PaddingScheme::kZero,  // Change to kReflected for reflected padding.
-                     &imageBuffer, &imageBufferWidth, &imageBufferHeight);
-
   std::function<double(const ::ImageWindow&)> applyKernel = [add, kernel](const ::ImageWindow& w) -> double {
     double res = add ? 128 : 0;
     for (int i = 0; i < w.width; ++i)
@@ -348,11 +359,12 @@ void MainWindow::Convolution(double** image, double *kernel, int kernelWidth, in
     return res;
   };
 
-  ::Convolve(::ImageWindowFactory(imageBuffer, imageBufferWidth, kernelWidth, kernelHeight),
-             std::move(applyKernel), image, imageWidth, imageHeight);
-  // Clean up.
-  for (int i = 0; i < imageBufferWidth * imageBufferHeight; ++i) delete[] imageBuffer[i];
-  delete[] imageBuffer;
+  // Allocate buffer with zero padding. Reflected padding can be specified by
+  // setting paddingScheme to PaddingScheme::kReflected.
+  ::PadAndConvolve(kernelWidth, kernelHeight,
+                   ::PaddingScheme::kZero,  // Change to kReflected for reflected padding.
+                   std::move(applyKernel),
+                   image, imageWidth, imageHeight);
 }
 
 /**************************************************
@@ -626,7 +638,7 @@ void MainWindow::FindPeaksImage(double** image, double thres)
   SobelImage(sobel);
   for (int i = 0; i < imageWidth*imageHeight; ++i) {
     // Reverse engineer Sobel calculation to restore magnitude.
-    sobel[i][2] += sobel[i][0] + sobel[i][1]; sobel[i][2] *= 2;
+    sobel[i][2] += sobel[i][0] + sobel[i][1]; sobel[i][2] /= 4;
   }
   // Using magnitudes and peaks to find orientation.
   for (int i = 0; i < imageWidth*imageHeight; ++i) {
@@ -634,8 +646,8 @@ void MainWindow::FindPeaksImage(double** image, double thres)
     image[i][0] = image[i][1] = image[i][2] = 0;
     if (sobel[i][2] <= thres) continue;
     // Reverse engineer Sobel calculation to obtain sine and cosine of orientation.
-    double sin_theta = 4*sobel[i][0]/sobel[i][2] - 1;
-    double cos_theta = 4*sobel[i][1]/sobel[i][2] - 1;
+    double sin_theta = sobel[i][0]/(2*sobel[i][2]) - 1;
+    double cos_theta = sobel[i][1]/(2*sobel[i][2]) - 1;
     // Calculate edge magnitudes with interpolation.
     int r = i / imageWidth, c = i % imageWidth;
     double rgb[3];
@@ -771,14 +783,6 @@ void MainWindow::MedianImage(double** image, int radius)
  * radius: radius of the kernel
 */
 {
-  int size = 2*radius + 1;  // Kernel size.
-
-  int imageBufferWidth, imageBufferHeight;
-  double** imageBuffer;
-  ::MakePaddedBuffer(image, imageWidth, imageHeight, size, size,
-                     PaddingScheme::kReflected,
-                     &imageBuffer, &imageBufferWidth, &imageBufferHeight);
-
   std::function<double(const ::ImageWindow&)> findMedian = [](const ::ImageWindow& w) -> double {
     const int size = w.width*w.height; Q_ASSERT(size > 0);
     std::vector<double> pixels; pixels.reserve(size);    
@@ -788,11 +792,11 @@ void MainWindow::MedianImage(double** image, int radius)
     return (*std::max_element(pixels.begin(), pixels.begin() + size/2) + pixels[size/2])/2.0;
   };
 
-  ::Convolve(::ImageWindowFactory(imageBuffer, imageBufferWidth, size, size),
-             std::move(findMedian), image, imageWidth, imageHeight);
-  // Clean up.
-  for (int i = 0; i < imageBufferWidth * imageBufferHeight; ++i) delete[] imageBuffer[i];
-  delete[] imageBuffer;
+  int kernelSize = 2*radius + 1;
+  ::PadAndConvolve(kernelSize, kernelSize,
+                   ::PaddingScheme::kReflected,
+                   std::move(findMedian),
+                   image, imageWidth, imageHeight);
 }
 
 // Apply Bilater filter on an image
@@ -803,7 +807,49 @@ void MainWindow::BilateralImage(double** image, double sigmaS, double sigmaI)
  * sigmaI: standard deviation in the intensity/range domain
 */
 {
-    // Add your code here.  Should be similar to GaussianBlurImage.
+  std::function<double(const ::ImageWindow&)> filter = [](const ::ImageWindow& w) -> double {
+    return 0;
+  };
+
+  int radius = static_cast<int>(3 * std::ceil(std::max(sigmaS, sigmaI)));  
+  int kernelSize = 2*radius + 1;
+
+  ::PadAndConvolve(kernelSize, kernelSize,
+                   ::PaddingScheme::kReflected,
+                   std::move(filter),
+                   image, imageWidth, imageHeight);
+}
+
+namespace {
+  void drawLine(int radius, int angle,
+                double* const* image, int imageWidth, int imageHeight) {
+    // Vertical lines.
+    if (angle == 0 || angle == 180) {
+      int i = imageWidth/2 + (angle == 0 ? radius : -radius);
+      for (int j = 0; j < imageHeight; ++j) std::fill_n(image[j*imageWidth + i], 3, 255.);
+      return;
+    }
+    // Horizontal lines.
+    if (angle == 90 || angle == 270) {
+      int j = imageHeight/2 + (angle == 90 ? -radius : radius);
+      for (int i = 0; i < imageWidth; ++i) std::fill_n(image[j*imageWidth + i], 3, 255.);
+      return;
+    }
+    // Other lines.
+    double theta = angle*M_PI/180.0;
+    for (int x = -imageWidth/2; x < imageWidth - imageWidth/2; ++x) {
+      double y = -x*std::cos(theta)/std::sin(theta) + radius/std::sin(theta);
+      int j = imageHeight/2 - static_cast<int>(std::round(y));
+      if (0 <= j && j < imageHeight)
+        std::fill_n(image[j*imageWidth + imageWidth/2 + x], 3, 255.);
+    }
+    for (int y = imageHeight/2; y > imageHeight/2 - imageHeight; --y) {
+      double x = -y*std::sin(theta)/std::cos(theta) + radius/std::cos(theta);
+      int i = imageWidth/2 + x;
+      if (0 <= i && i < imageWidth)
+        std::fill_n(image[(imageHeight/2 - y)*imageWidth + i], 3, 255.);
+    }
+  }
 }
 
 // Perform the Hough transform
@@ -812,7 +858,49 @@ void MainWindow::HoughImage(double** image)
  * image: input image in matrix form of size (imageWidth*imageHeight)*3 having double values
 */
 {
-    // Add your code here
+  FindPeaksImage(image, 20.0);  // First identify peaks
+  // Vote for lines in (r, angle) space. Reduce fidelity of angles and radius.
+  constexpr int NUM_ANGLES = 180;
+  constexpr int RADIUS_SCALE = 1;
+  constexpr int ANGLE_SCALE = 360/NUM_ANGLES;
+  std::map<int, std::array<int, NUM_ANGLES>> accumulator;
+  for (int i = 0; i < imageWidth; ++i)
+    for (int j = 0; j < imageHeight; ++j)
+      if (image[j*imageWidth + i][0] == 255)
+        for (int angle = 0; angle < NUM_ANGLES; ++angle) {
+          int x = i - imageWidth/2;
+          int y = imageHeight/2 - j;
+          double theta = ANGLE_SCALE*angle*M_PI/180.;
+          double radius = std::cos(theta)*x + std::sin(theta)*y;          
+          if (radius >= 0) accumulator[static_cast<int>(std::round(radius))/RADIUS_SCALE][angle] += 1;
+        }
+  // Zero out image.
+  double** lines = new double*[imageWidth*imageHeight];  
+  for (int i = 0; i < imageWidth*imageHeight; ++i) lines[i] = new double[3]{0, 0, 0};
+  // Gather the top K lines.
+  const int K = 32;
+  std::priority_queue<int, std::vector<int>, std::greater<int>> top_k_votes;
+  for (const std::pair<int, std::array<int, NUM_ANGLES>>& radius_votes : accumulator)
+    for (int num_votes : radius_votes.second)
+      if (top_k_votes.size() < K) {
+        top_k_votes.push(num_votes);
+      } else if (top_k_votes.top() < num_votes) {
+        top_k_votes.pop(); top_k_votes.push(num_votes);
+      }
+
+  // Draw lines with sufficient votes.
+  for (const std::pair<int, std::array<int, NUM_ANGLES>>& radius_votes : accumulator)
+    for (int angle = 0; angle < NUM_ANGLES; ++angle)
+      if (radius_votes.second[angle] >= top_k_votes.top() && radius_votes.second[angle] >= 64) {
+        ::drawLine(radius_votes.first*RADIUS_SCALE, angle*ANGLE_SCALE,
+                   lines, imageWidth, imageHeight);
+      }
+  // Merge into peaks.
+  for (int i = 0; i < imageWidth*imageHeight; ++i)  // Maybe should do fuzzier matching here.
+    if (image[i][0] == 255 && lines[i][0] == 0) std::fill_n(image[i], 3, 0.);
+  // Clean up memory.
+  for (int i = 0; i < imageWidth*imageHeight; ++i) delete[] lines[i];
+  delete[] lines;
 }
 
 // Perform smart K-means clustering
