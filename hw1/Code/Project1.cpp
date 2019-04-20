@@ -773,7 +773,34 @@ void MainWindow::HistogramSeedImage(double** image, int num_clusters)
  * num_clusters: number of clusters into which the image is to be clustered
 */
 {
-    // Add your code here
+  constexpr int BUCKET_SIZE = 32;
+  constexpr int NUM_BUCKETS = 256/BUCKET_SIZE;
+  std::array<int, NUM_BUCKETS*NUM_BUCKETS*NUM_BUCKETS> counts; // 3-dimensional histogram.  
+  for (int i = 0; i < imageWidth*imageHeight; ++i) {
+    int bucket_index = (static_cast<int>(image[i][0])/BUCKET_SIZE)*NUM_BUCKETS*NUM_BUCKETS +
+      (static_cast<int>(image[i][1])/BUCKET_SIZE)*NUM_BUCKETS +
+      static_cast<int>(image[i][2])/BUCKET_SIZE;
+    ++counts[bucket_index];
+  }
+  // Create distribution based on histogram.
+  std::mt19937_64 generator((std::random_device())());
+  std::discrete_distribution<> color_dist(counts.begin(), counts.end());
+  // Sample from empirical distribution to create clusters.
+  double** clusters = new double*[num_clusters];
+  for (int k = 0; k < num_clusters; ++k) {
+    int bucket_index = color_dist(generator);
+    double red = (bucket_index/(NUM_BUCKETS*NUM_BUCKETS))*BUCKET_SIZE + BUCKET_SIZE/2;
+    bucket_index %= 64;
+    double green = (bucket_index/NUM_BUCKETS)*BUCKET_SIZE + BUCKET_SIZE/2;
+    bucket_index %= 8;
+    double blue = bucket_index*BUCKET_SIZE + BUCKET_SIZE/2;
+    clusters[k] = new double[3]{red, green, blue};
+  }
+
+  KMeans(clusters, num_clusters, image, imageWidth, imageHeight);
+
+  for (int k = 0; k < num_clusters; ++k) delete[] clusters[k];
+  delete[] clusters;  
 }
 
 // Apply the median filter on a noisy image to remove the noise
