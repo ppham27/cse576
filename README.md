@@ -25,3 +25,12 @@ Run tests with `qmake` and `make check`.
 ```
 qmake Project1Test.pro && make check
 ```
+
+## Homework 2
+
+Similar to [Homework 1](#homework-1), launch the application with `qmake` and
+`make` from the `hw2/code` directory.
+
+```
+qmake ImageStitcher.pro CONFIG+=debug && make && ./ImageStitcher.app/Contents/MacOS/ImageStitcher
+```
