@@ -1,4 +1,9 @@
 #include <algorithm>
+#include <array>
+#include <cmath>
+#include <functional>
+#include <limits>
+#include <memory>
 #include <utility>
 #include <vector>
 
@@ -471,19 +476,17 @@ void MainWindow::HarrisCornerDetector(QImage image, double sigma, double thres, 
       }
     }
 
-
-    // Once you know the number of corner points allocate an array as follows:
+    // Access the values using: (*cornerPts)[i].m_X = 5.0;
+    //
+    // The position of the corner point is (m_X, m_Y)
+    // The descriptor of the corner point is stored in m_Desc
+    // The length of the descriptor is m_DescSize, if m_DescSize = 0, then it is not valid.
     numCornerPts = corner_pts.size();
     *cornerPts = new CIntPt[numCornerPts];
     for (int i = 0; i < numCornerPts; ++i) {
       (*cornerPts)[i].m_X = static_cast<double>(corner_pts[i].second);
       (*cornerPts)[i].m_Y = static_cast<double>(corner_pts[i].first);
     }
-    // Access the values using: (*cornerPts)[i].m_X = 5.0;
-    //
-    // The position of the corner point is (m_X, m_Y)
-    // The descriptor of the corner point is stored in m_Desc
-    // The length of the descriptor is m_DescSize, if m_DescSize = 0, then it is not valid.
 
     // Once you are done finding the corner points, display them on the image
     DrawCornerPoints(*cornerPts, numCornerPts, imageDisplay);
@@ -491,6 +494,29 @@ void MainWindow::HarrisCornerDetector(QImage image, double sigma, double thres, 
     delete [] buffer;
 }
 
+namespace {
+  template<typename T, unsigned int D>
+  class Index {
+  public:
+    explicit Index(std::vector<std::array<T, D>> points) :
+      points_(points) {}
+
+    Index() = delete;
+
+    int nn_search(const T* query) const {
+      std::pair<int, double> neighbor = std::make_pair(-1, std::numeric_limits<double>::max());
+      for (int i = 0; i < points_.size(); ++i) {
+        double distance = 0;
+        for (int j = 0; j < D; ++j) distance += std::abs(query[j] - points_[i][j]);
+        if (distance < neighbor.second) neighbor = std::make_pair(i, distance);
+      }
+      return neighbor.first;
+    }
+    
+  private:
+    const std::vector<std::array<T, D>> points_;
+  };
+}
 
 /*******************************************************************************
 Find matching corner points between images.
@@ -506,27 +532,51 @@ Find matching corner points between images.
     image2Display - image used to display matches
 *******************************************************************************/
 void MainWindow::MatchCornerPoints(QImage image1, CIntPt *cornerPts1, int numCornerPts1,
-                             QImage image2, CIntPt *cornerPts2, int numCornerPts2,
-                             CMatches **matches, int &numMatches, QImage &image1Display, QImage &image2Display)
-{
-    numMatches = 0;
+                                   QImage image2, CIntPt *cornerPts2, int numCornerPts2,
+                                   CMatches **matches, int &numMatches,
+                                   QImage &image1Display, QImage &image2Display) {
+  // Compute the descriptors for each corner point.
+  // You can access the descriptor for each corner point using cornerPts1[i].m_Desc[j].
+  // If cornerPts1[i].m_DescSize = 0, it was not able to compute a descriptor for that point
+  ComputeDescriptors(image1, cornerPts1, numCornerPts1);
+  ComputeDescriptors(image2, cornerPts2, numCornerPts2);
 
-    // Compute the descriptors for each corner point.
-    // You can access the descriptor for each corner point using cornerPts1[i].m_Desc[j].
-    // If cornerPts1[i].m_DescSize = 0, it was not able to compute a descriptor for that point
-    ComputeDescriptors(image1, cornerPts1, numCornerPts1);
-    ComputeDescriptors(image2, cornerPts2, numCornerPts2);
+  CIntPt* &from_corner_pts = numCornerPts1 <= numCornerPts2 ? cornerPts1 : cornerPts2;
+  CIntPt* &to_corner_pts = numCornerPts1 <= numCornerPts2 ? cornerPts2 : cornerPts1;
 
-    // Add your code here for finding the best matches for each point.
+  std::function<int(CIntPt*&)> size = [&](CIntPt*& x) -> int {
+    return x == cornerPts1 ? numCornerPts1 : numCornerPts2;
+  };
 
-    // Once you uknow the number of matches allocate an array as follows:
-    // *matches = new CMatches [numMatches];
-    //
-    // The position of the corner point in iamge 1 is (m_X1, m_Y1)
+  std::vector<std::array<double, DESC_SIZE>> points;
+  for (int i = 0; i < size(to_corner_pts); ++i) {
+    if (to_corner_pts[i].m_DescSize != DESC_SIZE) continue;
+    std::array<double, DESC_SIZE> point;
+    for (int j = 0; j < DESC_SIZE; ++j) point[j] = to_corner_pts[i].m_Desc[j];
+    points.push_back(std::move(point));
+  }
+  const ::Index<double, DESC_SIZE> index(std::move(points));
+
+  std::function<CMatches(int,int)> make_match =
+    [&](int i, int j) -> CMatches {
+    // The position of the corner point in image 1 is (m_X1, m_Y1)
     // The position of the corner point in image 2 is (m_X2, m_Y2)
+    double x1 = from_corner_pts[i].m_X, y1 = from_corner_pts[i].m_Y;
+    double x2 = to_corner_pts[j].m_X, y2 = to_corner_pts[j].m_Y;
+    if (from_corner_pts == cornerPts2) { std::swap(x1, x2); std::swap(y1, y2); }
+    return CMatches{x1, y1, x2, y2};
+  };
 
-    // Draw the matches
-    DrawMatches(*matches, numMatches, image1Display, image2Display);
+  numMatches = 0;
+  *matches = new CMatches[size(from_corner_pts)];  // Allocates potentially extra space.
+  for (int i = 0; i < size(from_corner_pts); ++i) {
+    if (!from_corner_pts[i].m_DescSize) continue;
+    int neighbor = index.nn_search(from_corner_pts[i].m_Desc);
+    (*matches)[numMatches++] = make_match(i, neighbor);
+  }
+
+  // Draw the matches
+  DrawMatches(*matches, numMatches, image1Display, image2Display);
 }
 
 /*******************************************************************************
