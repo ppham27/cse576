@@ -1,3 +1,7 @@
+#include <algorithm>
+#include <utility>
+#include <vector>
+
 #include "mainwindow.h"
 #include "math.h"
 #include "ui_mainwindow.h"
@@ -8,6 +12,144 @@
     The following are helper routines with code already written.
     The routines you'll need to write for the assignment are below.
 *******************************************************************************/
+
+/*******************************************************************************
+Blur a single channel floating point image with a Gaussian.
+    image - input and output image
+    w - image width
+    h - image height
+    sigma - standard deviation of Gaussian
+*******************************************************************************/
+void MainWindow::GaussianBlurImage(double *image, int w, int h, double sigma)
+{
+    int r, c, rd, cd, i;
+    int radius = max(1, (int) (sigma*3.0));
+    int size = 2*radius + 1;
+    double *buffer = new double [w*h];
+
+    memcpy(buffer, image, w*h*sizeof(double));
+
+    if(sigma == 0.0)
+        return;
+
+    double *kernel = new double [size];
+
+    for(i=0;i<size;i++)
+    {
+        double dist = (double) (i - radius);
+
+        kernel[i] = exp(-(dist*dist)/(2.0*sigma*sigma));
+    }
+
+    double denom = 0.000001;
+
+    for(i=0;i<size;i++)
+        denom += kernel[i];
+    for(i=0;i<size;i++)
+        kernel[i] /= denom;
+
+    for(r=0;r<h;r++)
+    {
+        for(c=0;c<w;c++)
+        {
+            double val = 0.0;
+            double denom = 0.0;
+
+            for(rd=-radius;rd<=radius;rd++)
+                if(r + rd >= 0 && r + rd < h)
+                {
+                     double weight = kernel[rd + radius];
+
+                     val += weight*buffer[(r + rd)*w + c];
+                     denom += weight;
+                }
+
+            val /= denom;
+
+            image[r*w + c] = val;
+        }
+    }
+
+    memcpy(buffer, image, w*h*sizeof(double));
+
+    for(r=0;r<h;r++)
+    {
+        for(c=0;c<w;c++)
+        {
+            double val = 0.0;
+            double denom = 0.0;
+
+            for(cd=-radius;cd<=radius;cd++)
+                if(c + cd >= 0 && c + cd < w)
+                {
+                     double weight = kernel[cd + radius];
+
+                     val += weight*buffer[r*w + c + cd];
+                     denom += weight;
+                }
+
+            val /= denom;
+
+            image[r*w + c] = val;
+        }
+    }
+
+
+    delete [] kernel;
+    delete [] buffer;
+}
+
+
+/*******************************************************************************
+Bilinearly interpolate image (helper function for Stitch)
+    image - input image
+    (x, y) - location to interpolate
+    rgb - returned color values
+*******************************************************************************/
+bool MainWindow::BilinearInterpolation(QImage *image, double x, double y, double rgb[3])
+{
+
+    int r = (int) y;
+    int c = (int) x;
+    double rdel = y - (double) r;
+    double cdel = x - (double) c;
+    QRgb pixel;
+    double del;
+
+    rgb[0] = rgb[1] = rgb[2] = 0.0;
+
+    if(r >= 0 && r < image->height() - 1 && c >= 0 && c < image->width() - 1)
+    {
+        pixel = image->pixel(c, r);
+        del = (1.0 - rdel)*(1.0 - cdel);
+        rgb[0] += del*(double) qRed(pixel);
+        rgb[1] += del*(double) qGreen(pixel);
+        rgb[2] += del*(double) qBlue(pixel);
+
+        pixel = image->pixel(c+1, r);
+        del = (1.0 - rdel)*(cdel);
+        rgb[0] += del*(double) qRed(pixel);
+        rgb[1] += del*(double) qGreen(pixel);
+        rgb[2] += del*(double) qBlue(pixel);
+
+        pixel = image->pixel(c, r+1);
+        del = (rdel)*(1.0 - cdel);
+        rgb[0] += del*(double) qRed(pixel);
+        rgb[1] += del*(double) qGreen(pixel);
+        rgb[2] += del*(double) qBlue(pixel);
+
+        pixel = image->pixel(c+1, r+1);
+        del = (rdel)*(cdel);
+        rgb[0] += del*(double) qRed(pixel);
+        rgb[1] += del*(double) qGreen(pixel);
+        rgb[2] += del*(double) qBlue(pixel);
+    }
+    else
+        return false;
+
+    return true;
+}
+
 
 /*******************************************************************************
 Draw detected Harris corners
@@ -250,24 +392,6 @@ bool MainWindow::ComputeHomography(CMatches *matches, int numMatches, double h[3
 
 
 /*******************************************************************************
-Blur a single channel floating point image with a Gaussian.
-    image - input and output image
-    w - image width
-    h - image height
-    sigma - standard deviation of Gaussian
-
-    This code should be very similar to the code you wrote for assignment 1.
-*******************************************************************************/
-void MainWindow::GaussianBlurImage(double *image, int w, int h, double sigma)
-{
-    // Add your code here
-
-    // To access the pixel (c,r), use image[r*width + c].
-
-}
-
-
-/*******************************************************************************
 Detect Harris corners.
     image - input image
     sigma - standard deviation of Gaussian used to blur corner detector
@@ -284,8 +408,6 @@ void MainWindow::HarrisCornerDetector(QImage image, double sigma, double thres, 
     double *buffer = new double [w*h];
     QRgb pixel;
 
-    numCornerPts = 0;
-
     // Compute the corner response using just the green channel
     for(r=0;r<h;r++)
        for(c=0;c<w;c++)
@@ -296,9 +418,67 @@ void MainWindow::HarrisCornerDetector(QImage image, double sigma, double thres, 
         }
 
     // Write your Harris corner detection code here.
+    GaussianBlurImage(buffer, w, h, sigma);
 
-    // Once you uknow the number of corner points allocate an array as follows:
-    // *cornerPts = new CIntPt [numCornerPts];
+    std::vector<std::vector<double>> x_derivative(h, std::vector<double>(c, 0));
+    std::vector<std::vector<double>> y_derivative(h, std::vector<double>(c, 0));
+    for (int r = 1; r < h - 1; ++r)
+      for (int c = 1; c < w - 1; ++c) {
+        x_derivative[r][c] = (buffer[r*w + c + 1] - buffer[r*w + c - 1])/2.0;
+        y_derivative[r][c] = (buffer[(r+1)*w + c] - buffer[(r-1)*w + c])/2.0;
+      }
+
+    if (h >= 2)
+      for (int c = 0; c < w; ++c) {
+        y_derivative[0][c] = buffer[w + c]/2.0;  // First row.
+        y_derivative[h - 1][c] = - buffer[(h-2)*w + c]/2.0;  // Last row
+      }
+    
+    if (w > 2)
+      for (int r = 0; r < h; ++r) {
+        x_derivative[r][0] = buffer[r*w + 1]/2.0;  // First column.
+        x_derivative[r][w - 1] = -buffer[r*w + (w-2)]/2.0;  // Last column.
+      }
+
+
+    std::vector<std::vector<double>> response(h, std::vector<double>(c, 0));
+    for (int r = 0; r < h; ++r)
+      for (int c = 0; c < w; ++c) {        
+        double x_squared = x_derivative[r][c]*x_derivative[r][c];
+        double y_squared = y_derivative[r][c]*y_derivative[r][c];
+        double det = x_squared*y_squared - 2.*x_derivative[r][c]*y_derivative[r][c];
+        double tr = x_squared + y_squared;
+        if (tr != 0) response[r][c] = det/tr;
+      }
+    
+    std::vector<std::pair<int, int>> corner_pts;
+    for (int r = 0; r < h; ++r) {
+      for (int c = 0; c < w; ++c) {
+        // Ignore points below threshold and trivial border corners.
+        if (response[r][c] < thres ||
+            (r == 0 && c == 0) || (r == 0 && c == w - 1) ||
+            (r == h - 1 && c == 0) || (r == h - 1 && c == w - 1)) continue;
+        int top = std::max(0, r - 2), right = std::min(w, c + 3),
+          bottom = std::min(h, r + 3), left = std::max(0, c - 2);
+
+        double max_response = 0;
+        for (int i = top; i < bottom; ++i)
+          for (int j = left; j < right; ++j) 
+            if (i != r && j != c)
+              max_response = std::max(response[i][j], max_response);
+
+        if (response[r][c] > max_response) corner_pts.emplace_back(r, c);
+      }
+    }
+
+
+    // Once you know the number of corner points allocate an array as follows:
+    numCornerPts = corner_pts.size();
+    *cornerPts = new CIntPt[numCornerPts];
+    for (int i = 0; i < numCornerPts; ++i) {
+      (*cornerPts)[i].m_X = static_cast<double>(corner_pts[i].second);
+      (*cornerPts)[i].m_Y = static_cast<double>(corner_pts[i].first);
+    }
     // Access the values using: (*cornerPts)[i].m_X = 5.0;
     //
     // The position of the corner point is (m_X, m_Y)
@@ -397,22 +577,6 @@ void MainWindow::RANSAC(CMatches *matches, int numMatches, int numIterations, do
     //DrawMatches(inliers, numInliers, image1Display, image2Display);
 
 }
-
-/*******************************************************************************
-Bilinearly interpolate image (helper function for Stitch)
-    image - input image
-    (x, y) - location to interpolate
-    rgb - returned color values
-
-    You can just copy code from previous assignment.
-*******************************************************************************/
-bool MainWindow::BilinearInterpolation(QImage *image, double x, double y, double rgb[3])
-{
-    // Add your code here.
-
-    return true;
-}
-
 
 /*******************************************************************************
 Stitch together two images using the homography transformation
