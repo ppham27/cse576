@@ -423,9 +423,9 @@ void MainWindow::HarrisCornerDetector(QImage image, double sigma, double thres,
             buffer[r*w + c] = (double) qGreen(pixel);
         }
 
-    // Write your Harris corner detection code here.
+    // Blur before taking derivatives. Convolutions are commutative.
     GaussianBlurImage(buffer, w, h, sigma);
-
+    // Gather up the derivatives in the general case.
     std::vector<std::vector<double>> x_derivative(h, std::vector<double>(c, 0));
     std::vector<std::vector<double>> y_derivative(h, std::vector<double>(c, 0));
     for (int r = 1; r < h - 1; ++r)
@@ -433,20 +433,18 @@ void MainWindow::HarrisCornerDetector(QImage image, double sigma, double thres,
         x_derivative[r][c] = (buffer[r*w + c + 1] - buffer[r*w + c - 1])/2.0;
         y_derivative[r][c] = (buffer[(r+1)*w + c] - buffer[(r-1)*w + c])/2.0;
       }
-
+    // Consider edge cases.
     if (h >= 2)
       for (int c = 0; c < w; ++c) {
         y_derivative[0][c] = buffer[w + c]/2.0;  // First row.
-        y_derivative[h - 1][c] = - buffer[(h-2)*w + c]/2.0;  // Last row
-      }
-    
+        y_derivative[h - 1][c] = -buffer[(h-2)*w + c]/2.0;  // Last row
+      }    
     if (w > 2)
       for (int r = 0; r < h; ++r) {
         x_derivative[r][0] = buffer[r*w + 1]/2.0;  // First column.
         x_derivative[r][w - 1] = -buffer[r*w + (w-2)]/2.0;  // Last column.
       }
-
-
+    // Compute the response function from the derivative.
     std::vector<std::vector<double>> response(h, std::vector<double>(c, 0));
     for (int r = 0; r < h; ++r)
       for (int c = 0; c < w; ++c) {        
@@ -456,7 +454,7 @@ void MainWindow::HarrisCornerDetector(QImage image, double sigma, double thres,
         double tr = x_squared + y_squared;
         if (tr != 0) response[r][c] = det/tr;
       }
-    
+    // Evaluate the responses for corner points.
     std::vector<std::pair<int, int>> corner_pts;
     for (int r = 0; r < h; ++r) {
       for (int c = 0; c < w; ++c) {
@@ -464,15 +462,14 @@ void MainWindow::HarrisCornerDetector(QImage image, double sigma, double thres,
         if (response[r][c] < thres ||
             (r == 0 && c == 0) || (r == 0 && c == w - 1) ||
             (r == h - 1 && c == 0) || (r == h - 1 && c == w - 1)) continue;
+        // Do non-maximum suppression on a 5x5 window.
         int top = std::max(0, r - 2), right = std::min(w, c + 3),
           bottom = std::min(h, r + 3), left = std::max(0, c - 2);
-
         double max_response = 0;
         for (int i = top; i < bottom; ++i)
           for (int j = left; j < right; ++j) 
             if (i != r && j != c)
               max_response = std::max(response[i][j], max_response);
-
         if (response[r][c] > max_response) corner_pts.emplace_back(r, c);
       }
     }
@@ -541,14 +538,13 @@ void MainWindow::MatchCornerPoints(QImage image1, CIntPt *cornerPts1, int numCor
   // If cornerPts1[i].m_DescSize = 0, it was not able to compute a descriptor for that point
   ComputeDescriptors(image1, cornerPts1, numCornerPts1);
   ComputeDescriptors(image2, cornerPts2, numCornerPts2);
-
+  // Match points assuming one set of points subsets the other.
   CIntPt* &from_corner_pts = numCornerPts1 <= numCornerPts2 ? cornerPts1 : cornerPts2;
   CIntPt* &to_corner_pts = numCornerPts1 <= numCornerPts2 ? cornerPts2 : cornerPts1;
-
   std::function<int(CIntPt*&)> size = [&](CIntPt*& x) -> int {
     return x == cornerPts1 ? numCornerPts1 : numCornerPts2;
   };
-
+  // Build an index to do a nearest neighbor search.
   std::vector<std::array<double, DESC_SIZE>> points;
   for (int i = 0; i < size(to_corner_pts); ++i) {
     if (to_corner_pts[i].m_DescSize != DESC_SIZE) continue;
@@ -557,7 +553,7 @@ void MainWindow::MatchCornerPoints(QImage image1, CIntPt *cornerPts1, int numCor
     points.push_back(std::move(point));
   }
   const ::Index<double, DESC_SIZE> index(std::move(points));
-
+  // Given two indices make a match.
   std::function<CMatches(int,int)> make_match =
     [&](int i, int j) -> CMatches {
     // The position of the corner point in image 1 is (m_X1, m_Y1)
@@ -567,7 +563,7 @@ void MainWindow::MatchCornerPoints(QImage image1, CIntPt *cornerPts1, int numCor
     if (from_corner_pts == cornerPts2) { std::swap(x1, x2); std::swap(y1, y2); }
     return CMatches{x1, y1, x2, y2};
   };
-
+  // Find all the matches with a nearest neighbor search.
   numMatches = 0;
   *matches = new CMatches[size(from_corner_pts)];  // Allocates potentially extra space.
   for (int i = 0; i < size(from_corner_pts); ++i) {
@@ -575,11 +571,9 @@ void MainWindow::MatchCornerPoints(QImage image1, CIntPt *cornerPts1, int numCor
     int neighbor = index.nn_search(from_corner_pts[i].m_Desc);
     (*matches)[numMatches++] = make_match(i, neighbor);
   }
-
   // Draw the matches
   DrawMatches(*matches, numMatches, image1Display, image2Display);
 }
-
 
 namespace {
   inline void Project(double x1, double y1, double &x2, double &y2, const double h[3][3]) {
@@ -603,7 +597,7 @@ Project a point (x1, y1) using the homography transformation h
     h - input homography used to project point
 *******************************************************************************/
 void MainWindow::Project(double x1, double y1, double &x2, double &y2, double h[3][3]) {
-  ::Project(x1, y1, x2, y2, h);
+  ::Project(x1, y1, x2, y2, h);  // Delegate to pure function.
 }
 
 /*******************************************************************************
@@ -617,12 +611,8 @@ Count the number of inliers given a homography.  This is a helper function for R
 *******************************************************************************/
 int MainWindow::ComputeInlierCount(double h[3][3], CMatches *matches, int numMatches, double inlierThreshold) {
   int num_inliers = 0;
-  for (int i = 0; i < numMatches; ++i) {
-    // double x3, y3;
-    // Project(matches[i].m_X1, matches[i].m_Y1, x3, y3, h);
-    // if (std::abs(x3 - matches[i].m_X2) + std::abs(y3 - matches[i].m_Y2) <= inlierThreshold) ++num_inliers;
+  for (int i = 0; i < numMatches; ++i)
     if (::IsInlier(matches[i], h, inlierThreshold)) ++num_inliers;
-  }
   return num_inliers;
 }
 
