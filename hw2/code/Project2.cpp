@@ -3,7 +3,9 @@
 #include <cmath>
 #include <functional>
 #include <limits>
+#include <iterator>
 #include <memory>
+#include <random>
 #include <utility>
 #include <vector>
 
@@ -300,8 +302,7 @@ Given a set of matches computes the "best fitting" homography
     h - returned homography
     isForward - direction of the projection (true = image1 -> image2, false = image2 -> image1)
 *******************************************************************************/
-bool MainWindow::ComputeHomography(CMatches *matches, int numMatches, double h[3][3], bool isForward)
-{
+bool MainWindow::ComputeHomography(CMatches *matches, int numMatches, double h[3][3], bool isForward) {
     int error;
     int nEq=numMatches*2;
 
@@ -405,8 +406,8 @@ Detect Harris corners.
     numCornerPts - number of corner points returned
     imageDisplay - image returned to display (for debugging)
 *******************************************************************************/
-void MainWindow::HarrisCornerDetector(QImage image, double sigma, double thres, CIntPt **cornerPts, int &numCornerPts, QImage &imageDisplay)
-{
+void MainWindow::HarrisCornerDetector(QImage image, double sigma, double thres,
+                                      CIntPt **cornerPts, int &numCornerPts, QImage &imageDisplay) {
     int r, c;
     int w = image.width();
     int h = image.height();
@@ -579,15 +580,30 @@ void MainWindow::MatchCornerPoints(QImage image1, CIntPt *cornerPts1, int numCor
   DrawMatches(*matches, numMatches, image1Display, image2Display);
 }
 
+
+namespace {
+  inline void Project(double x1, double y1, double &x2, double &y2, const double h[3][3]) {
+    double w = x1*h[2][0] + y1*h[2][1] + h[2][2];
+    x2 = (x1*h[0][0] + y1*h[0][1] + h[0][2])/w;
+    y2 = (x1*h[1][0] + y1*h[1][1] + h[1][2])/w;
+  }
+
+
+  inline bool IsInlier(const CMatches& match, const double h[3][3], const double inlierThreshold) {
+    double x3, y3;
+    ::Project(match.m_X1, match.m_Y1, x3, y3, h);
+    return std::abs(x3 - match.m_X2) + std::abs(y3 - match.m_Y2) <= inlierThreshold;
+  }
+}
+
 /*******************************************************************************
 Project a point (x1, y1) using the homography transformation h
     (x1, y1) - input point
     (x2, y2) - returned point
     h - input homography used to project point
 *******************************************************************************/
-void MainWindow::Project(double x1, double y1, double &x2, double &y2, double h[3][3])
-{
-    // Add your code here.
+void MainWindow::Project(double x1, double y1, double &x2, double &y2, double h[3][3]) {
+  ::Project(x1, y1, x2, y2, h);
 }
 
 /*******************************************************************************
@@ -599,13 +615,16 @@ Count the number of inliers given a homography.  This is a helper function for R
 
     Returns the total number of inliers.
 *******************************************************************************/
-int MainWindow::ComputeInlierCount(double h[3][3], CMatches *matches, int numMatches, double inlierThreshold)
-{
-    // Add your code here.
-
-    return 0;
+int MainWindow::ComputeInlierCount(double h[3][3], CMatches *matches, int numMatches, double inlierThreshold) {
+  int num_inliers = 0;
+  for (int i = 0; i < numMatches; ++i) {
+    // double x3, y3;
+    // Project(matches[i].m_X1, matches[i].m_Y1, x3, y3, h);
+    // if (std::abs(x3 - matches[i].m_X2) + std::abs(y3 - matches[i].m_Y2) <= inlierThreshold) ++num_inliers;
+    if (::IsInlier(matches[i], h, inlierThreshold)) ++num_inliers;
+  }
+  return num_inliers;
 }
-
 
 /*******************************************************************************
 Compute homography transformation between images using RANSAC.
@@ -619,12 +638,33 @@ Compute homography transformation between images using RANSAC.
     image2Display - image used to display matches
 *******************************************************************************/
 void MainWindow::RANSAC(CMatches *matches, int numMatches, int numIterations, double inlierThreshold,
-                        double hom[3][3], double homInv[3][3], QImage &image1Display, QImage &image2Display)
-{
-    // Add your code here.
-
-    // After you're done computing the inliers, display the corresponding matches.
-    //DrawMatches(inliers, numInliers, image1Display, image2Display);
+                        double hom[3][3], double homInv[3][3], QImage &image1Display, QImage &image2Display) {
+  std::mt19937_64 generator((std::random_device())());
+  // Copy all the matches into inliers for shuffling.
+  CMatches* inliers = new CMatches[numMatches];
+  std::copy(matches, matches + numMatches, inliers);
+  // Repeatedly shuffle and test homographies.
+  int numInliers = 0;
+  double testHom[3][3];
+  for (int i = 0; i < numIterations; ++i) {
+    std::shuffle(inliers, inliers + numMatches, generator);
+    ComputeHomography(inliers, 4, testHom, true);
+    int testNumInliers = ComputeInlierCount(testHom,  matches, numMatches, inlierThreshold);
+    if (numInliers < testNumInliers) {
+      numInliers = testNumInliers;
+      for (int j = 0; j < 3; ++j) std::copy(testHom[j], testHom[j] + 3, hom[j]);
+    }
+  }
+  // Gather up the inliers associated with the homography.
+  int inlierIndex = 0;
+  for (int i = 0; i < numMatches; ++i)
+    if (::IsInlier(matches[i], hom, inlierThreshold)) inliers[inlierIndex++] = matches[i];
+  Q_ASSERT_X(inlierIndex == numInliers, "RANSAC", "Inlier counts do not match.");
+  // Compute a new homography.
+  ComputeHomography(inliers, numInliers, hom, true);
+  ComputeHomography(inliers, numInliers, homInv, false);
+  // After you're done computing the inliers, display the corresponding matches.
+  DrawMatches(inliers, numInliers, image1Display, image2Display);
 
 }
 
