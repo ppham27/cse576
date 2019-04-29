@@ -665,7 +665,6 @@ void MainWindow::RANSAC(CMatches *matches, int numMatches, int numIterations, do
   ComputeHomography(inliers, numInliers, homInv, false);
   // After you're done computing the inliers, display the corresponding matches.
   DrawMatches(inliers, numInliers, image1Display, image2Display);
-
 }
 
 /*******************************************************************************
@@ -676,17 +675,44 @@ Stitch together two images using the homography transformation
     homInv - inverse homography transformation (image2 -> image1)
     stitchedImage - returned stitched image
 *******************************************************************************/
-void MainWindow::Stitch(QImage image1, QImage image2, double hom[3][3], double homInv[3][3], QImage &stitchedImage)
-{
-    // Width and height of stitchedImage
-    int ws = 0;
-    int hs = 0;
+void MainWindow::Stitch(QImage image1, QImage image2, double hom[3][3], double homInv[3][3], QImage &stitchedImage) {
+    double xtl, ytl;  // Top left.
+    ::Project(0, 0, xtl, ytl, homInv);
 
-    // Add your code to compute ws and hs here.
+    double xtr, ytr;  // Top right.
+    ::Project(image2.width() - 1, 0, xtr, ytr, homInv);
 
+    double xbr, ybr;  // Bottom right.
+    ::Project(image2.width() - 1, image2.height() - 1, xbr, ybr, homInv);
+
+    double xbl, ybl;  // Bottom left.
+    ::Project(0, image2.height() - 1, xbl, ybl, homInv);
+
+    // Origin, width and height of stitchedImage.
+    int xstl = std::min(std::min(0, static_cast<int>(floor(xtl))),
+                        static_cast<int>(floor(xbl)));
+    int ystl = std::min(std::min(0, static_cast<int>(floor(ytl))),
+                        static_cast<int>(floor(ytr)));
+    int xsbr = std::max(std::max(image1.width() - 1, static_cast<int>(floor(xtr))),
+                        static_cast<int>(floor(xbr))) + 1;
+    int ysbr = std::max(std::max(image1.height() - 1, static_cast<int>(floor(ybl))),
+                        static_cast<int>(floor(ybr))) + 1;
+    int ws = xsbr - xstl;
+    int hs = ysbr - ystl;
     stitchedImage = QImage(ws, hs, QImage::Format_RGB32);
     stitchedImage.fill(qRgb(0,0,0));
-
-    // Add you code to warp image1 and image2 to stitchedImage here.
+    // Translate image1 into the stiched image.
+    for (int j = 0; j < image1.width(); ++j)
+      for (int i = 0; i < image1.height(); ++i)
+        stitchedImage.setPixel(j - xstl, i - ystl, image1.pixel(j, i));
+    // Project image2 onto the stiched image.
+    for (int j = 0; j < ws; ++j)
+      for (int i = 0; i < hs; ++i) {
+        double rgb[3];
+        double x, y;
+        ::Project(j + xstl, i + ystl, x, y, hom);  // Translate back to image1 before projecting.
+        if (BilinearInterpolation(&image2, x, y, rgb))
+          stitchedImage.setPixel(j, i, qRgb(rgb[0], rgb[1], rgb[2]));
+      }      
 }
 
