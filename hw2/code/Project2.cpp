@@ -657,6 +657,17 @@ void MainWindow::RANSAC(CMatches *matches, int numMatches, int numIterations, do
   DrawMatches(inliers, numInliers, image1Display, image2Display);
 }
 
+namespace {
+  double CenterWeight(double x, double y, double width, double height, unsigned int p) {    
+    if (x < 0  || width <= x) qInfo() << x << ' ' << width << ' ' << height;
+    Q_ASSERT_X(0 <= x && x < width, "CenterWeight", "x is not in range.");
+    Q_ASSERT_X(0 <= y && y < height, "CenterWeight", "y is not in range.");
+    double x_delta = std::min(x + 1., width - x);
+    double y_delta = std::min(y + 1., height - y);
+    return std::pow(std::min(x_delta, y_delta), p);
+  }
+}
+
 /*******************************************************************************
 Stitch together two images using the homography transformation
     image1 - first input image
@@ -677,6 +688,15 @@ void MainWindow::Stitch(QImage image1, QImage image2, double hom[3][3], double h
 
     double xbl, ybl;  // Bottom left.
     ::Project(0, image2.height() - 1, xbl, ybl, homInv);
+
+    // Assume orientation is pretty much correct, so corners are in the same
+    // relative position. In theory, a homography may flip or rotate.
+    double projected_image2_scale = [=]() -> double {
+      double projected_image2_width = std::max(xtr, xbr) - std::min(xtl, xbl);
+      double projected_image2_height = std::max(ybl, ybr) - std::min(ytl, ytr);
+      return std::sqrt((projected_image2_width/image2.width())*
+                       (projected_image2_height/image2.height()));
+    }();
 
     // Origin, width and height of stitchedImage.
     int xstl = std::min(std::min(0, static_cast<int>(floor(xtl))),
@@ -700,9 +720,30 @@ void MainWindow::Stitch(QImage image1, QImage image2, double hom[3][3], double h
       for (int i = 0; i < hs; ++i) {
         double rgb[3];
         double x, y;
-        ::Project(j + xstl, i + ystl, x, y, hom);  // Translate back to image1 before projecting.
-        if (BilinearInterpolation(&image2, x, y, rgb))
-          stitchedImage.setPixel(j, i, qRgb(rgb[0], rgb[1], rgb[2]));
+        int image1_x = j + xstl, image1_y = i + ystl;  // Translate back to image1 before projecting.
+        ::Project(image1_x, image1_y, x, y, hom);
+        QRgb pixel1 = stitchedImage.pixel(j, i);
+        if (BilinearInterpolation(&image2, x, y, rgb)) {
+          if (0 <= image1_x && image1_x < image1.width() &&
+              0 <= image1_y && image1_y < image1.height() &&
+              !(qRed(pixel1) == 0 && qGreen(pixel1) == 0 && qBlue(pixel1) == 0)) {
+            // Overlapping region. Do center-weighting here.
+            double weight1 = CenterWeight(image1_x, image1_y, image1.width(), image1.height(), 2);
+            double weight2 = CenterWeight(static_cast<int>(x)*projected_image2_scale,
+                                          static_cast<int>(y)*projected_image2_scale,
+                                          image2.width()*projected_image2_scale,
+                                          image2.height()*projected_image2_scale, 2);
+            double total_weight = weight1 + weight2;
+            // Reweight channels.
+            double red = (weight1*qRed(pixel1) + weight2*rgb[0])/total_weight;
+            double green = (weight1*qGreen(pixel1) + weight2*rgb[1])/total_weight;
+            double blue = (weight1*qBlue(pixel1) + weight2*rgb[2])/total_weight;
+            stitchedImage.setPixel(j, i, qRgb(red, green, blue));
+          } else {
+            // Purely image 2.
+            stitchedImage.setPixel(j, i, qRgb(rgb[0], rgb[1], rgb[2]));
+          }
+        }
       }      
 }
 
