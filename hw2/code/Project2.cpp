@@ -188,6 +188,12 @@ void MainWindow::DrawCornerPoints(CIntPt *cornerPts, int numCornerPts, QImage &i
    }
 }
 
+namespace {
+  inline double Intensity(QRgb pixel) {
+    return qGreen(pixel);
+  }
+}
+
 /*******************************************************************************
 Compute corner point descriptors
     image - input image
@@ -214,11 +220,9 @@ void MainWindow::ComputeDescriptors(QImage image, CIntPt *cornerPts, int numCorn
 
     // Computer descriptors from green channel
     for(r=0;r<h;r++)
-       for(c=0;c<w;c++)
-        {
-            pixel = image.pixel(c, r);
-            buffer[r*w + c] = (double) qGreen(pixel);
-        }
+      for(c=0;c<w;c++)
+        buffer[r*w + c] = ::Intensity(image.pixel(c, r));
+
 
     // Blur
     GaussianBlurImage(buffer, w, h, sigma);
@@ -263,8 +267,7 @@ Draw matches between images
 
     Draws a green line between matches
 *******************************************************************************/
-void MainWindow::DrawMatches(CMatches *matches, int numMatches, QImage &image1Display, QImage &image2Display)
-{
+void MainWindow::DrawMatches(CMatches *matches, int numMatches, QImage &image1Display, QImage &image2Display) {
     int i;
     // Show matches on image
     QPainter painter;
@@ -396,7 +399,6 @@ bool MainWindow::ComputeHomography(CMatches *matches, int numMatches, double h[3
 *******************************************************************************
 *******************************************************************************/
 
-
 /*******************************************************************************
 Detect Harris corners.
     image - input image
@@ -416,12 +418,8 @@ void MainWindow::HarrisCornerDetector(QImage image, double sigma, double thres,
 
     // Compute the corner response using just the green channel
     for(r=0;r<h;r++)
-       for(c=0;c<w;c++)
-        {
-            pixel = image.pixel(c, r);
-
-            buffer[r*w + c] = (double) qGreen(pixel);
-        }
+      for(c=0;c<w;c++)
+        buffer[r*w + c] = ::Intensity(image.pixel(c, r));
 
     // Blur before taking derivatives. Convolutions are commutative.
     GaussianBlurImage(buffer, w, h, sigma);
