@@ -503,7 +503,7 @@ namespace {
     int nn_search(const T* query) const {
       std::pair<int, double> neighbor = std::make_pair(-1, std::numeric_limits<double>::max());
       for (int i = 0; i < points_.size(); ++i) {
-        for (int k = 0; k < D; k += 2) {  // Rotates descriptor by k*2*PI/D.
+        for (int k = 0; k < D; k += D/8) {  // Rotates descriptor by k*PI/4.
           double distance = 0;
           for (int j = 0; j < D; ++j) distance += std::abs(query[j] - points_[i][(j + k) % D]);
           if (distance < neighbor.second) neighbor = std::make_pair(i, distance);
