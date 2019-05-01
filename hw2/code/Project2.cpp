@@ -192,6 +192,8 @@ namespace {
   inline double Intensity(QRgb pixel) {
     return qGreen(pixel);
   }
+
+  constexpr int CUSTOM_DESC_SIZE = DESC_SIZE;
 }
 
 /*******************************************************************************
@@ -206,56 +208,55 @@ Compute corner point descriptors
     I've implemented a very simple 8 dimensional descriptor.  Feel free to
     improve upon this.
 *******************************************************************************/
-void MainWindow::ComputeDescriptors(QImage image, CIntPt *cornerPts, int numCornerPts)
-{
-    int r, c, cd, rd, i, j;
-    int w = image.width();
-    int h = image.height();
-    double *buffer = new double [w*h];
-    QRgb pixel;
+void MainWindow::ComputeDescriptors(QImage image, CIntPt *cornerPts, int numCornerPts) {
+  int w = image.width();
+  int h = image.height();
+  double *buffer = new double[w*h];
+  QRgb pixel;
 
-    // Descriptor parameters
-    double sigma = 2.0;
-    int rad = 4;
+  // Descriptor parameters
+  double sigma = 2.0;
 
-    // Computer descriptors from green channel
-    for(r=0;r<h;r++)
-      for(c=0;c<w;c++)
-        buffer[r*w + c] = ::Intensity(image.pixel(c, r));
+  // Computer descriptors from green channel
+  for(int r = 0; r < h; r++)
+    for(int c = 0; c < w; c++)
+      buffer[r*w + c] = ::Intensity(image.pixel(c, r));
 
+  // Blur
+  GaussianBlurImage(buffer, w, h, sigma);
 
-    // Blur
-    GaussianBlurImage(buffer, w, h, sigma);
-
-    // Compute the desciptor from the difference between the point sampled at its center
-    // and eight points sampled around it.
-    for(i=0;i<numCornerPts;i++)
-    {
-        int c = (int) cornerPts[i].m_X;
-        int r = (int) cornerPts[i].m_Y;
-
-        if(c >= rad && c < w - rad && r >= rad && r < h - rad)
-        {
-            double centerValue = buffer[(r)*w + c];
-            int j = 0;
-
-            for(rd=-1;rd<=1;rd++)
-                for(cd=-1;cd<=1;cd++)
-                    if(rd != 0 || cd != 0)
-                {
-                    cornerPts[i].m_Desc[j] = buffer[(r + rd*rad)*w + c + cd*rad] - centerValue;
-                    j++;
-                }
-
-            cornerPts[i].m_DescSize = DESC_SIZE;
-        }
-        else
-        {
-            cornerPts[i].m_DescSize = 0;
-        }
+  // Compute the desciptor from the difference between the point sampled at its center
+  // and eight points sampled around it. Go clockwise.
+  int max_delta = 4;
+#if DESC_SIZE == 16
+  static const int rd_map[::CUSTOM_DESC_SIZE] = {-4, -4, -4, -4,  -4, -2,  0,  2, 4, 4,  4,  4,  4,  2,  0, -2};
+  static const int cd_map[::CUSTOM_DESC_SIZE] = {-4, -2,  0,  2,   4,  4,  4,  4, 4, 2,  0, -2, -4, -4, -4, -4};
+#elif DESC_SIZE == 8
+  static const int rd_map[::CUSTOM_DESC_SIZE] = {-4, -4, -4,  0,  4,  4,  4,  0};
+  static const int cd_map[::CUSTOM_DESC_SIZE] = {-4, -0,  4,  4,  4,  0, -4, -4};
+#else
+#define STRINGIFY2(X) #X
+#define STRINGIFY(X) STRINGIFY2(X)
+  static_assert(::CUSTOM_DESC_SIZE == 8 || ::CUSTOM_DESC_SIZE == 16,
+                "Only descriptor sizes of 8 and 16 are supported, but DESC_SIZE is " STRINGIFY(DESC_SIZE) "."); 
+  int rd_map[::CUSTOM_DESC_SIZE]; int cd_map[::CUSTOM_DESC_SIZE];
+#endif
+  for(int i = 0; i < numCornerPts; ++i) {
+    int c = (int) cornerPts[i].m_X;
+    int r = (int) cornerPts[i].m_Y;
+    if(c >= max_delta && c < w - max_delta && r >= max_delta && r < h - max_delta) {
+      double centerValue = buffer[(r)*w + c];
+      for (int j = 0; j < ::CUSTOM_DESC_SIZE; ++j) {
+        int rd = rd_map[j], cd = cd_map[j];
+        cornerPts[i].m_Desc[j] = buffer[(r + rd)*w + c + cd] - centerValue;
+      }
+      cornerPts[i].m_DescSize = ::CUSTOM_DESC_SIZE;
+    } else {
+      cornerPts[i].m_DescSize = 0;
     }
+  }
 
-    delete [] buffer;
+  delete [] buffer;
 }
 
 /*******************************************************************************
@@ -502,9 +503,11 @@ namespace {
     int nn_search(const T* query) const {
       std::pair<int, double> neighbor = std::make_pair(-1, std::numeric_limits<double>::max());
       for (int i = 0; i < points_.size(); ++i) {
-        double distance = 0;
-        for (int j = 0; j < D; ++j) distance += std::abs(query[j] - points_[i][j]);
-        if (distance < neighbor.second) neighbor = std::make_pair(i, distance);
+        for (int k = 0; k < D; k += 2) {  // Rotates descriptor by k*2*PI/D.
+          double distance = 0;
+          for (int j = 0; j < D; ++j) distance += std::abs(query[j] - points_[i][(j + k) % D]);
+          if (distance < neighbor.second) neighbor = std::make_pair(i, distance);
+        }
       }
       return neighbor.first;
     }
@@ -543,14 +546,14 @@ void MainWindow::MatchCornerPoints(QImage image1, CIntPt *cornerPts1, int numCor
     return x == cornerPts1 ? numCornerPts1 : numCornerPts2;
   };
   // Build an index to do a nearest neighbor search.
-  std::vector<std::array<double, DESC_SIZE>> points;
+  std::vector<std::array<double, ::CUSTOM_DESC_SIZE>> points;
   for (int i = 0; i < size(to_corner_pts); ++i) {
-    if (to_corner_pts[i].m_DescSize != DESC_SIZE) continue;
-    std::array<double, DESC_SIZE> point;
-    for (int j = 0; j < DESC_SIZE; ++j) point[j] = to_corner_pts[i].m_Desc[j];
+    if (to_corner_pts[i].m_DescSize != ::CUSTOM_DESC_SIZE) continue;
+    std::array<double, ::CUSTOM_DESC_SIZE> point;
+    for (int j = 0; j < ::CUSTOM_DESC_SIZE; ++j) point[j] = to_corner_pts[i].m_Desc[j];
     points.push_back(std::move(point));
   }
-  const ::Index<double, DESC_SIZE> index(std::move(points));
+  const ::Index<double, ::CUSTOM_DESC_SIZE> index(std::move(points));
   // Given two indices make a match.
   std::function<CMatches(int,int)> make_match =
     [&](int i, int j) -> CMatches {
