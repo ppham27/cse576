@@ -34,3 +34,12 @@ Similar to [Homework 1](#homework-1), launch the application with `qmake` and
 ```
 qmake ImageStitcher.pro CONFIG+=debug && make && ./ImageStitcher.app/Contents/MacOS/ImageStitcher &
 ```
+
+## Homework 3
+
+Similar to [Homework 1](#homework-1), launch the application with `qmake` and
+`make` from the `hw3/Code` directory.
+
+```
+qmake ImageRetrieval.pro CONFIG+=debug && make && ./ImageRetrieval.app/Contents/MacOS/ImageRetrieval &
+```
