@@ -1,10 +1,16 @@
+#include <atomic>
+#include <chrono>
+#include <iostream>
+#include <string>
+#include <thread>
+
+#include <QtGui>
+#include <QFileDialog>
+
 #include "mainwindow.h"
 #include "math.h"
 #include "ui_mainwindow.h"
-#include <QtGui>
-#include <QFileDialog>
-#include <string.h>
-#include <iostream>
+
 #ifdef _MSC_VER
     #include "headers/dirent.h"
 #else
@@ -38,33 +44,55 @@ MainWindow::~MainWindow()
 
 /***** LOADING DATABASE *****/
 
-void MainWindow::LoadDatabase()
-{
-    ui->progressBox->setText(QString::fromStdString(""));
-    std::string dirname = FolderName + "/Database";
-    DIR *dir = opendir(dirname.c_str());
-    struct dirent *d;
-    if (dir != NULL)
-    {
-        num_images = 0;
-        while ((d = readdir(dir)) != NULL)
-        {
-            if (d->d_name[0] != '.')
-            {
-                names.push_back(dirname + "/" + d->d_name); num_images++;
-            }            
-        }
-        QImage image;
-        for (int i=0; i<num_images; i++)
-        {
-            image.load(QString::fromStdString(names[i]));
-            ui->progressBox->setText(QString::fromStdString("Processing image "+std::to_string(i+1)+".."));
-            QApplication::processEvents();
-            databasefeatures.push_back(ExtractFeatureVector(image));
-        }
-        ui->textBrowser_0->setText(QString::fromStdString("**Done**"));
-        ui->progressBox->setText(QString::fromStdString(""));
+void MainWindow::LoadDatabase() {  
+  ui->progressBox->setText(QString::fromStdString(""));
+  std::string dirname = FolderName + "/Database";
+  DIR *dir = opendir(dirname.c_str());
+  struct dirent *d;
+  if (dir != NULL) {
+    num_images = 0;
+    while ((d = readdir(dir)) != NULL) {
+      if (d->d_name[0] != '.') {
+        names.push_back(dirname + "/" + d->d_name); num_images++;
+      }            
     }
+
+    databasefeatures.resize(num_images);
+
+    const size_t num_threads = std::thread::hardware_concurrency();
+    qInfo() << "Using"
+            << num_threads
+            << "concurrent threads to extract features.";
+    std::vector<std::thread> threads; threads.reserve(num_threads);
+    int offset = 0;
+    std::atomic<int> num_images_processed(0);
+    for (int i = 0; i < num_threads; ++i) {
+      const int length = (num_images/num_threads) + (i < num_images % num_threads ? 1 : 0);
+      threads.emplace_back([this](const std::vector<std::string>& names, int begin, int end,
+                                  std::atomic<int>* num_images_processed) {
+          for (int j = begin; j < end; ++j) {
+            qInfo() << "Processing image" << (j + 1) << QString::fromStdString(names[j]);
+            QImage image;
+            image.load(QString::fromStdString(names[j]));
+            this->databasefeatures[j] = ExtractFeatureVector(image);
+            ++(*num_images_processed);
+          }
+        }, names, offset, offset + length, &num_images_processed);
+      offset += length;
+    }
+    Q_ASSERT_X(offset == num_images, "LoadDatabase", "Images were not loaded.");
+    while (num_images_processed < num_images) {
+      ui->progressBox->setText(QString::fromStdString("Images processed: " +
+                                                      std::to_string(num_images_processed) + "/" +
+                                                      std::to_string(num_images)));
+      QApplication::processEvents();
+      std::this_thread::sleep_for(std::chrono::milliseconds(1000));
+    }
+    for (std::thread& t : threads) t.join();
+
+    ui->textBrowser_0->setText(QString::fromStdString("**Done**"));
+    ui->progressBox->setText(QString::fromStdString(""));
+  }
 }
 
 /***** VIEWING AN IMAGE *****/
@@ -129,6 +157,7 @@ void MainWindow::OpenImage()
     ui->textBrowser->setText(QString::fromStdString(new_filename.substr(0, found2)));
     DrawDisplayImage();
     ui->ImgDisplay->setPixmap(QPixmap::fromImage(displayImage));
+    ui->progressBox->setText(QString::fromStdString(filename + " loaded as query image!"));
 }
 
 /***** SORTING IMAGE DISTANCES *****/
