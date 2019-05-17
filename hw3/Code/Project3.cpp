@@ -210,8 +210,28 @@ namespace {
     const int pixel = image.pixel(c, r);
     const int gray_level = static_cast<int>(std::round(0.3*qRed(pixel) + 0.6*qGreen(pixel) + 0.1*qBlue(pixel)));
     return gray_level/kGlcmBucketSize;
-  }  
-}
+  }
+
+  namespace GlcmFeature {
+    double Contrast(double* glcm) {
+      double contrast = 0;
+      for (int i = 0; i < kGlcmSize; ++i)
+        for (int j = 0; j < kGlcmSize; ++j)
+          contrast += (i - j)*(i - j)*glcm[i*kGlcmSize + j];
+      return contrast;
+    }
+
+    double Energy(const double* const glcm) {
+      return std::accumulate(glcm, glcm + kGlcmSize*kGlcmSize, 0.,
+                             [](double contrast, double prob) { return contrast + prob*prob; });
+    }
+
+    double Entropy(const double* const glcm) {
+      return std::accumulate(glcm, glcm + kGlcmSize*kGlcmSize, 0.,
+                             [](double entropy, double prob) { return entropy + -prob*std::log2(prob); });
+    }
+  }  // namespace GlcmFeature
+}  // namespace
 
 /**************************************************
 Code to compute the features of a given image (both database images and query image)
@@ -263,10 +283,11 @@ std::vector<double*> MainWindow::ExtractFeatureVector(QImage image) {
   for(int i = 0; i < num_regions; ++i) {
     features[i] = new double[featurevectorlength]();  // initialize with zeros
     features[i][kTop] = h - 1; features[i][kRight] = 0; features[i][kLeft] = w - 1; features[i][kBottom] = 0;
+    // Initialize GLCM with a Dirichlet prior.
+    std::fill_n(features[i] + kGlcm, kGlcmSize*kGlcmSize, /*alpha=*/0.01);
   }
 
-  // Sample code for computing the mean RGB values and size of each connected component
-
+  // Accumulate features. We'll normalize for region size later.
   for(int r = 0; r < h; r++)
     for (int c = 0; c < w; c++) {
       const int region_id = remapped_region_ids[nimg[r*w + c] - 1];
@@ -316,7 +337,7 @@ std::vector<double*> MainWindow::ExtractFeatureVector(QImage image) {
     std::transform(features[region_id] + kGlcm,
                    features[region_id] + kGlcm + kGlcmSize*kGlcmSize,
                    features[region_id] + kGlcm, [n = num_glcm_observations](double x) { return x/n; });
-
+    // Normalize volume and save.
     features[region_id][0] /= (double) w*h;
     featurevector.push_back(features[region_id]);
   }
