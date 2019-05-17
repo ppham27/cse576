@@ -1,5 +1,6 @@
 #include <algorithm>
 #include <chrono>
+#include <cmath>
 #include <cstdlib>
 #include <functional>
 #include <limits>
@@ -20,74 +21,70 @@
 CODE FOR K-MEANS COLOR IMAGE CLUSTERING (RANDOM SEED)
 **************************************************/
 
-void Clustering(QImage *image, int num_clusters, int maxit)
-{
-        int w = image->width(), h = image->height();
-        QImage buffer = image->copy();
+namespace {
+  static constexpr int kMaxColorLevel = 256;
+}
 
-        std::vector<QRgb> centers, centers_new;
+void Clustering(QImage *image, int num_clusters, int maxit) {
+  int w = image->width(), h = image->height();
+  QImage buffer = image->copy();
 
-        //initialize random centers
-        int n = 1; srand(2020);
-        while (n <= num_clusters)
-        {
-            QRgb center = qRgb(rand() % 256, rand() % 256, rand() % 256);
-            centers.push_back(center);
-            centers_new.push_back(center);
-            n++;
+  std::vector<QRgb> centers, centers_new;
+
+  //initialize random centers
+  srand(2020);
+  for (int i = 0; i < num_clusters; ++i) {
+    QRgb center = qRgb(rand() % kMaxColorLevel, rand() % kMaxColorLevel, rand() % kMaxColorLevel);
+    centers.push_back(center);
+    centers_new.push_back(center);
+  }
+
+  //iterative part
+  int it = 0;
+  std::vector<int> ids;
+  while (it < maxit) {
+    ids.clear();
+    //assign pixels to clusters
+    for (int r = 0; r < h; r++)
+      for (int c = 0; c < w; c++) {
+        int maxd = 999999, id = 0;
+        for (int n = 0; n < num_clusters; n++) {
+          QRgb pcenter = centers[n];
+          QRgb pnow = buffer.pixel(c, r);
+          int d = abs(qRed(pcenter) - qRed(pnow)) + abs(qGreen(pcenter) - qGreen(pnow)) + abs(qBlue(pcenter) - qBlue(pnow));
+          if (d < maxd) { 
+            maxd = d;
+            id = n;
+          }
         }
+        ids.push_back(id);
+      }
 
-        //iterative part
-        int it = 0;
-        std::vector<int> ids;
-        while (it < maxit)
-        {
-                ids.clear();
-                //assign pixels to clusters
-                for (int r = 0; r < h; r++)
-                	for (int c = 0; c < w; c++)
-                	{
-                        int maxd = 999999, id = 0;
-                        for (int n = 0; n < num_clusters; n++)
-                        {
-                                QRgb pcenter = centers[n];
-                                QRgb pnow = buffer.pixel(c, r);
-                                int d = abs(qRed(pcenter) - qRed(pnow)) + abs(qGreen(pcenter) - qGreen(pnow)) + abs(qBlue(pcenter) - qBlue(pnow));
-                                if (d < maxd)
-                                {
-                                        maxd = d; id = n;
-                                }
-                        }
-                        ids.push_back(id);
-                	}
+    //update centers
+    std::vector<int> cnt, rs, gs, bs;
+    for (int n = 0; n < num_clusters; n++) {
+      rs.push_back(0); gs.push_back(0); bs.push_back(0); cnt.push_back(0);
+    }
+    for (int r = 0; r < h; r++)
+      for (int c = 0; c < w; c++) {
+        QRgb pixel = buffer.pixel(c,r);
+        rs[ids[r * w + c]] += qRed(pixel);
+        gs[ids[r * w + c]] += qGreen(pixel);
+        bs[ids[r * w + c]] += qBlue(pixel);
+        ++cnt[ids[r * w + c]];
+      }
+    for (int n = 0; n < num_clusters; n++)
+      if (cnt[n] == 0) // no pixels in a cluster
+        continue;
+      else
+        centers_new[n] = qRgb(rs[n]/cnt[n], gs[n]/cnt[n], bs[n]/cnt[n]);
 
-                //update centers
-                std::vector<int> cnt, rs, gs, bs;
-                for (int n = 0; n < num_clusters; n++)
-                {
-                        rs.push_back(0); gs.push_back(0); bs.push_back(0); cnt.push_back(0);
-                }
-                for (int r = 0; r < h; r++)
-                    for (int c = 0; c < w; c++)
-                    {
-                        QRgb pixel = buffer.pixel(c,r);
-                        rs[ids[r * w + c]] += qRed(pixel);
-                        gs[ids[r * w + c]] += qGreen(pixel);
-                        bs[ids[r * w + c]] += qBlue(pixel);
-                        cnt[ids[r * w + c]]++;
-                    }
-                for (int n = 0; n < num_clusters; n++)
-                    if (cnt[n] == 0) // no pixels in a cluster
-                        continue;
-                    else
-                        centers_new[n] = qRgb(rs[n]/cnt[n], gs[n]/cnt[n], bs[n]/cnt[n]);
-
-                centers = centers_new; it++;
-        }
-        //render results
-        for (int r = 0; r < h; r++)
-            for (int c = 0; c < w; c++)
-                image->setPixel(c, r, qRgb(ids[r * w + c],ids[r * w + c],ids[r * w + c]));
+    centers = centers_new; it++;
+  }
+  //render results
+  for (int r = 0; r < h; r++)
+    for (int c = 0; c < w; c++)
+      image->setPixel(c, r, qRgb(ids[r * w + c],ids[r * w + c],ids[r * w + c]));
 }
 
 /**************************************************
@@ -158,7 +155,6 @@ void conrgn(int *image, int *nimage, int width, int height) {
 
   delete[] parent;
   delete[] labels;
-  return;
 }
 
 
@@ -192,18 +188,29 @@ namespace {
 }
 
 namespace {
+  static constexpr int kGlcmSize = 8;
+  static constexpr int kGlcmBucketSize = kMaxColorLevel / kGlcmSize;
+
   enum Feature {
+    // Volume of region.
     kSize = 0,
-    kRed,
-    kGreen,
-    kBlue,
-    kRow,
-    kColumn,
-    kTop,
-    kRight,
-    kBottom,
-    kLeft,
+    // Color features.
+    kRed, kGreen, kBlue,
+    // Centroid features.
+    kRow, kColumn,
+    // Bounding box features.
+    kTop, kRight, kBottom, kLeft,
+    // GLCM (gray-level co-occurence matrix).
+    kGlcm,
+    // Allocate enough space for GLCM.
+    kNumFeatures = kGlcm + kGlcmSize*kGlcmSize,
   };
+
+  int GetGrayLevel(const QImage& image, const int r, const int c) {
+    const int pixel = image.pixel(c, r);
+    const int gray_level = static_cast<int>(std::round(0.3*qRed(pixel) + 0.6*qGreen(pixel) + 0.1*qBlue(pixel)));
+    return gray_level/kGlcmBucketSize;
+  }  
 }
 
 /**************************************************
@@ -224,7 +231,6 @@ std::vector<double*> MainWindow::ExtractFeatureVector(QImage image) {
   int max_iterations = 50;
   QImage image_copy = image;
   Clustering(&image_copy, num_clusters, max_iterations);
-
 
   /********** STEP 2 **********/
   // Find connected components in the labeled segmented image
@@ -248,7 +254,7 @@ std::vector<double*> MainWindow::ExtractFeatureVector(QImage image) {
   // Extract the feature vector of each region
 
   // Set length of feature vector according to the number of features you plan to use.
-  featurevectorlength = 10;
+  featurevectorlength = kNumFeatures;
 
   // Initializations required to compute feature vector
 
@@ -279,6 +285,15 @@ std::vector<double*> MainWindow::ExtractFeatureVector(QImage image) {
       features[region_id][kRight] = std::max(features[region_id][kRight], static_cast<double>(c)/w);
       features[region_id][kBottom] = std::max(features[region_id][kBottom], static_cast<double>(r)/h);
       features[region_id][kLeft] = std::min(features[region_id][kLeft], static_cast<double>(c)/w);
+      // GCLM with diagonal neighbor.
+      const int neighbor_r = r + 1; const int neighbor_c = c + 1;
+      const int neighbor_region_id =
+        neighbor_r < h && neighbor_c < w ? remapped_region_ids[nimg[neighbor_r*w + neighbor_c] - 1] : -1;
+      if (neighbor_region_id == region_id) {
+        const int gray_level = GetGrayLevel(image, r, c);
+        const int neighbor_gray_level = GetGrayLevel(image, neighbor_r, neighbor_c);
+        features[region_id][kGlcm + kGlcmSize*gray_level + neighbor_gray_level] += 1;
+      }
     }
 
   // Normalization.
@@ -295,6 +310,12 @@ std::vector<double*> MainWindow::ExtractFeatureVector(QImage image) {
                "ExtractFeatureVector", "Bounding box is invalid.");
     Q_ASSERT_X(features[region_id][kLeft] <= features[region_id][kRight],
                "ExtractFeatureVector", "Bounding box is invalid.");
+    // GLCM, make a joint probability distribution
+    const int num_glcm_observations =
+      std::accumulate(features[region_id] + kGlcm, features[region_id] + kGlcm + kGlcmSize*kGlcmSize, 0);
+    std::transform(features[region_id] + kGlcm,
+                   features[region_id] + kGlcm + kGlcmSize*kGlcmSize,
+                   features[region_id] + kGlcm, [n = num_glcm_observations](double x) { return x/n; });
 
     features[region_id][0] /= (double) w*h;
     featurevector.push_back(features[region_id]);
