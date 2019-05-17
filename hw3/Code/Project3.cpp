@@ -3,7 +3,9 @@
 #include <cstdlib>
 #include <functional>
 #include <limits>
+#include <mutex>
 #include <queue>
+#include <unordered_map>
 #include <thread>
 #include <utility>
 
@@ -167,12 +169,23 @@ TIME TO WRITE CODE
 **************************************************/
 
 namespace {
-  int PreProcessRegions(const int width, const int height, const int* const region_ids) {
+  std::vector<int> PreProcessRegions(const int width, const int height, const int* const region_ids) {
+    unordered_map<int, int> num_pixels_in_region;
     int num_regions = 0;
     for (int r = 0; r < height; ++r)
-      for (int c = 0; c < width; ++c)
+      for (int c = 0; c < width; ++c) {
+        ++num_pixels_in_region[region_ids[r*width + c] - 1];
         num_regions = region_ids[r*width + c] > num_regions ? region_ids[r*width + c] : num_regions;
-    return num_regions;
+      }
+    // Skip regions smaller that 1 percent of the image.
+    std::vector<int> remapped_region_ids; remapped_region_ids.reserve(num_regions);
+    int next_remapped_id = 0;
+    for (int i = 0; i < num_regions; ++i) {
+      const int remapped_id =
+        static_cast<double>(num_pixels_in_region[i])/(width*height) < 0.01 ? -1 : next_remapped_id++;
+      remapped_region_ids.push_back(remapped_id);
+    }
+    return remapped_region_ids;
   }
 }
 
@@ -210,7 +223,8 @@ std::vector<double*> MainWindow::ExtractFeatureVector(QImage image) {
   memset(nimg, 0, w*h*sizeof(int));
   conrgn(img, nimg, w, h);
 
-  const int num_regions = ::PreProcessRegions(h, w, nimg);
+  const std::vector<int> remapped_region_ids = ::PreProcessRegions(h, w, nimg);
+  const int num_regions = *std::max_element(remapped_region_ids.begin(), remapped_region_ids.end()) + 1;
   // The resultant image of Step 2 is 'nimg', whose values range from 1 to num_regions
 
   /********** STEP 3 **********/
@@ -222,14 +236,16 @@ std::vector<double*> MainWindow::ExtractFeatureVector(QImage image) {
   // Initializations required to compute feature vector
 
   std::vector<double*> featurevector;  // final feature vector of the image; to be returned
-  double **features = new double*[num_regions];  // stores the feature vector for each connected component
+  double** const features = new double*[num_regions];  // stores the feature vector for each connected component
   for(int i = 0; i < num_regions; ++i) features[i] = new double[featurevectorlength]();  // initialize with zeros
 
   // Sample code for computing the mean RGB values and size of each connected component
 
   for(int r = 0; r < h; r++)
     for (int c = 0; c < w; c++) {
-      const int region_id = nimg[r*w + c] - 1;
+      const int region_id = remapped_region_ids[nimg[r*w + c] - 1];
+      if (region_id == -1) continue;
+      Q_ASSERT_X(region_id < num_regions, "ExtractFeatureVector", "Out of range region ID.");
       features[region_id][0] += 1; // stores the number of pixels for each connected component
       features[region_id][1] += (double) qRed(image.pixel(c, r));
       features[region_id][2] += (double) qGreen(image.pixel(c, r));
@@ -296,19 +312,26 @@ void MainWindow::CalculateDistances(bool isOne) {
   // Initialize distances to max.
   std::fill_n(this->distances, num_images, std::numeric_limits<double>::max());
 
-  // Put calculated distances in queue for furhter processing.
-  std::queue<std::pair<int, double>> distances;
+  // Put calculated distances in queue for further processing.
+  std::queue<std::pair<int, double>> distances; std::mutex distances_mutex;
+  const std::function<void(const std::vector<double*>&, int)>
+    enqueue_distance = [&database = this->databasefeatures,
+                        &match_region_by_distance,
+                        &distance_fn,
+                        &distances,
+                        &distances_mutex](const std::vector<double*>& query_features, int i) {
+    double distance = match_region_by_distance(query_features, database[i], distance_fn);
+    std::lock_guard<std::mutex> lock(distances_mutex);
+    distances.emplace(i, distance);
+  };
+
   const size_t num_threads = std::thread::hardware_concurrency();
   std::vector<std::thread> threads; threads.reserve(num_threads);
   for(int thread_id = 0; thread_id < num_threads; ++thread_id) {
-    threads.emplace_back([&match_region_by_distance,
-                          &distance_fn](const std::vector<double*>& query_features,
-                                        const std::vector<std::vector<double*>>& database,
-                                        int start, int stop, int step,
-                                        std::queue<std::pair<int, double>>* distances) {
-                           for (int i = start; i < stop; i += step)
-                             distances->emplace(i, match_region_by_distance(query_features, database[i], distance_fn));
-                         }, queryfeature, databasefeatures, thread_id, num_images, num_threads, &distances);
+    threads.emplace_back([&enqueue_distance](const std::vector<double*>& query_features,
+                                             int start, int stop, int step) {
+                           for (int i = start; i < stop; i += step) enqueue_distance(query_features, i);
+                         }, queryfeature, thread_id, num_images, num_threads);
   }
   
   int num_distances_computed = 0;
