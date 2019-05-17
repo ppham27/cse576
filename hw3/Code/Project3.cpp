@@ -169,7 +169,8 @@ TIME TO WRITE CODE
 **************************************************/
 
 namespace {
-  std::vector<int> PreProcessRegions(const int width, const int height, const int* const region_ids) {
+  std::vector<int> PreProcessRegions(const int width, const int height, const int* const region_ids,
+                                     double threshold) {
     unordered_map<int, int> num_pixels_in_region;
     int num_regions = 0;
     for (int r = 0; r < height; ++r)
@@ -177,16 +178,32 @@ namespace {
         ++num_pixels_in_region[region_ids[r*width + c] - 1];
         num_regions = region_ids[r*width + c] > num_regions ? region_ids[r*width + c] : num_regions;
       }
-    // Skip regions smaller that 1 percent of the image.
+    // Threshold regions by size as a percentage of the image.
     std::vector<int> remapped_region_ids; remapped_region_ids.reserve(num_regions);
     int next_remapped_id = 0;
     for (int i = 0; i < num_regions; ++i) {
       const int remapped_id =
-        static_cast<double>(num_pixels_in_region[i])/(width*height) < 0.01 ? -1 : next_remapped_id++;
+        static_cast<double>(num_pixels_in_region[i])/(width*height) < threshold ? -1 : next_remapped_id++;
       remapped_region_ids.push_back(remapped_id);
     }
+    // TODO(pmp10): Add additional code that would replace -1s and merge with one of the big regions.
     return remapped_region_ids;
   }
+}
+
+namespace {
+  enum Feature {
+    kSize = 0,
+    kRed,
+    kGreen,
+    kBlue,
+    kRow,
+    kColumn,
+    kTop,
+    kRight,
+    kBottom,
+    kLeft,
+  };
 }
 
 /**************************************************
@@ -223,7 +240,7 @@ std::vector<double*> MainWindow::ExtractFeatureVector(QImage image) {
   memset(nimg, 0, w*h*sizeof(int));
   conrgn(img, nimg, w, h);
 
-  const std::vector<int> remapped_region_ids = ::PreProcessRegions(h, w, nimg);
+  const std::vector<int> remapped_region_ids = ::PreProcessRegions(h, w, nimg, /*threshold=*/0.01);
   const int num_regions = *std::max_element(remapped_region_ids.begin(), remapped_region_ids.end()) + 1;
   // The resultant image of Step 2 is 'nimg', whose values range from 1 to num_regions
 
@@ -231,13 +248,16 @@ std::vector<double*> MainWindow::ExtractFeatureVector(QImage image) {
   // Extract the feature vector of each region
 
   // Set length of feature vector according to the number of features you plan to use.
-  featurevectorlength = 4;
+  featurevectorlength = 10;
 
   // Initializations required to compute feature vector
 
   std::vector<double*> featurevector;  // final feature vector of the image; to be returned
   double** const features = new double*[num_regions];  // stores the feature vector for each connected component
-  for(int i = 0; i < num_regions; ++i) features[i] = new double[featurevectorlength]();  // initialize with zeros
+  for(int i = 0; i < num_regions; ++i) {
+    features[i] = new double[featurevectorlength]();  // initialize with zeros
+    features[i][kTop] = h - 1; features[i][kRight] = 0; features[i][kLeft] = w - 1; features[i][kBottom] = 0;
+  }
 
   // Sample code for computing the mean RGB values and size of each connected component
 
@@ -246,17 +266,38 @@ std::vector<double*> MainWindow::ExtractFeatureVector(QImage image) {
       const int region_id = remapped_region_ids[nimg[r*w + c] - 1];
       if (region_id == -1) continue;
       Q_ASSERT_X(region_id < num_regions, "ExtractFeatureVector", "Out of range region ID.");
-      features[region_id][0] += 1; // stores the number of pixels for each connected component
-      features[region_id][1] += (double) qRed(image.pixel(c, r));
-      features[region_id][2] += (double) qGreen(image.pixel(c, r));
-      features[region_id][3] += (double) qBlue(image.pixel(c, r));
+      features[region_id][kSize] += 1; // stores the number of pixels for each connected component
+      // Color features.
+      features[region_id][kRed] += (double) qRed(image.pixel(c, r));
+      features[region_id][kGreen] += (double) qGreen(image.pixel(c, r));
+      features[region_id][kBlue] += (double) qBlue(image.pixel(c, r));
+      // Centroid.
+      features[region_id][kRow] += static_cast<double>(r)/h;
+      features[region_id][kColumn] += static_cast<double>(c)/w;
+      // Bounding box.
+      features[region_id][kTop] = std::min(features[region_id][kTop], static_cast<double>(r)/h);
+      features[region_id][kRight] = std::max(features[region_id][kRight], static_cast<double>(c)/w);
+      features[region_id][kBottom] = std::max(features[region_id][kBottom], static_cast<double>(r)/h);
+      features[region_id][kLeft] = std::min(features[region_id][kLeft], static_cast<double>(c)/w);
     }
 
-  // Save the mean RGB and size values as image feature after normalization
-  for(int m = 0; m < num_regions; m++) {
-    for(int n = 1; n < featurevectorlength; n++) features[m][n] /= features[m][0]*255.0;
-    features[m][0] /= (double) w*h;
-    featurevector.push_back(features[m]);
+  // Normalization.
+  for(int region_id = 0; region_id < num_regions; ++region_id) {
+    // Save the mean RGB and size values as image feature after normalization
+    features[region_id][kRed] /= features[region_id][kSize]*255.0;
+    features[region_id][kGreen] /= features[region_id][kSize]*255.0;
+    features[region_id][kBlue] /= features[region_id][kSize]*255.0;
+    // Centroid.
+    features[region_id][kRow] /= features[region_id][kSize];
+    features[region_id][kColumn] /= features[region_id][kSize];
+    // Bounding box
+    Q_ASSERT_X(features[region_id][kTop] <= features[region_id][kBottom],
+               "ExtractFeatureVector", "Bounding box is invalid.");
+    Q_ASSERT_X(features[region_id][kLeft] <= features[region_id][kRight],
+               "ExtractFeatureVector", "Bounding box is invalid.");
+
+    features[region_id][0] /= (double) w*h;
+    featurevector.push_back(features[region_id]);
   }
 
   // Return the created feature vector
