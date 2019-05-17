@@ -166,85 +166,85 @@ TIME TO WRITE CODE
 **************************************************
 **************************************************/
 
+namespace {
+  int PreProcessRegions(const int width, const int height, const int* const region_ids) {
+    int num_regions = 0;
+    for (int r = 0; r < height; ++r)
+      for (int c = 0; c < width; ++c)
+        num_regions = region_ids[r*width + c] > num_regions ? region_ids[r*width + c] : num_regions;
+    return num_regions;
+  }
+}
 
 /**************************************************
 Code to compute the features of a given image (both database images and query image)
 **************************************************/
-std::vector<double*> MainWindow::ExtractFeatureVector(QImage image)
-{
-    /********** STEP 1 **********/
+std::vector<double*> MainWindow::ExtractFeatureVector(QImage image) {
+  /********** STEP 1 **********/
 
-    // Display the start of execution of this step in the progress box of the application window
-    // You can use these 2 lines to display anything you want at any point of time while debugging
+  // Display the start of execution of this step in the progress box of the application window
+  // You can use these 2 lines to display anything you want at any point of time while debugging
 
-    // Perform K-means color clustering
-    // This time the algorithm returns the cluster id for each pixel, not the rgb values of the corresponding cluster center
-    // The code for random seed clustering is provided. You are free to use any clustering algorithm of your choice from HW 1
-    // Experiment with the num_clusters and max_iterations values to get the best result
+  // Perform K-means color clustering
+  // This time the algorithm returns the cluster id for each pixel, not the rgb values of the corresponding cluster center
+  // The code for random seed clustering is provided. You are free to use any clustering algorithm of your choice from HW 1
+  // Experiment with the num_clusters and max_iterations values to get the best result
 
-    int num_clusters = 5;
-    int max_iterations = 50;
-    QImage image_copy = image;
-    Clustering(&image_copy,num_clusters,max_iterations);
-
-
-    /********** STEP 2 **********/
-    // Find connected components in the labeled segmented image
-    // Code is given, you don't need to change
-
-    int r, c, w = image_copy.width(), h = image_copy.height();
-    int *img = (int*)malloc(w*h * sizeof(int));
-    memset( img, 0, w * h * sizeof( int ) );
-    int *nimg = (int*)malloc(w*h *sizeof(int));
-    memset( nimg, 0, w * h * sizeof( int ) );
-
-    for (r=0; r<h; r++)
-        for (c=0; c<w; c++)
-            img[r*w + c] = qRed(image_copy.pixel(c,r));
-
-    conrgn(img, nimg, w, h);
-
-    int num_regions=0;
-    for (r=0; r<h; r++)
-        for (c=0; c<w; c++)
-            num_regions = (nimg[r*w+c]>num_regions)? nimg[r*w+c]: num_regions;
-    // The resultant image of Step 2 is 'nimg', whose values range from 1 to num_regions
-
-    // WRITE YOUR REGION THRESHOLDING AND REFINEMENT CODE HERE
+  int num_clusters = 5;
+  int max_iterations = 50;
+  QImage image_copy = image;
+  Clustering(&image_copy, num_clusters, max_iterations);
 
 
-    /********** STEP 3 **********/
-    // Extract the feature vector of each region
+  /********** STEP 2 **********/
+  // Find connected components in the labeled segmented image
+  // Code is given, you don't need to change
+  const int w = image_copy.width(); const int h = image_copy.height();
 
-    // Set length of feature vector according to the number of features you plan to use.
-    featurevectorlength = 4;
+  int *img = (int*) malloc(w*h * sizeof(int));
+  memset( img, 0, w * h * sizeof( int ) );
+  for (int r = 0; r < h; ++r)
+    for (int c = 0; c < w; ++c)
+      img[r*w + c] = qRed(image_copy.pixel(c, r));
+  int* nimg = (int*) malloc(w*h * sizeof(int));
+  memset(nimg, 0, w*h*sizeof(int));
+  conrgn(img, nimg, w, h);
 
-    // Initializations required to compute feature vector
+  const int num_regions = ::PreProcessRegions(h, w, nimg);
+  // The resultant image of Step 2 is 'nimg', whose values range from 1 to num_regions
 
-    std::vector<double*> featurevector; // final feature vector of the image; to be returned
-    double **features = new double* [num_regions]; // stores the feature vector for each connected component
-    for(int i=0;i<num_regions; i++)
-        features[i] = new double[featurevectorlength](); // initialize with zeros
+  /********** STEP 3 **********/
+  // Extract the feature vector of each region
 
-    // Sample code for computing the mean RGB values and size of each connected component
+  // Set length of feature vector according to the number of features you plan to use.
+  featurevectorlength = 4;
 
-    for(int r=0; r<h; r++)
-      for (int c=0; c<w; c++) {
-        features[nimg[r*w+c]-1][0] += 1; // stores the number of pixels for each connected component
-        features[nimg[r*w+c]-1][1] += (double) qRed(image.pixel(c,r));
-        features[nimg[r*w+c]-1][2] += (double) qGreen(image.pixel(c,r));
-        features[nimg[r*w+c]-1][3] += (double) qBlue(image.pixel(c,r));
-      }
+  // Initializations required to compute feature vector
 
-    // Save the mean RGB and size values as image feature after normalization
-    for(int m=0; m<num_regions; m++) {
-      for(int n=1; n<featurevectorlength; n++) features[m][n] /= features[m][0]*255.0;
-      features[m][0] /= (double) w*h;
-      featurevector.push_back(features[m]);
+  std::vector<double*> featurevector;  // final feature vector of the image; to be returned
+  double **features = new double*[num_regions];  // stores the feature vector for each connected component
+  for(int i = 0; i < num_regions; ++i) features[i] = new double[featurevectorlength]();  // initialize with zeros
+
+  // Sample code for computing the mean RGB values and size of each connected component
+
+  for(int r = 0; r < h; r++)
+    for (int c = 0; c < w; c++) {
+      const int region_id = nimg[r*w + c] - 1;
+      features[region_id][0] += 1; // stores the number of pixels for each connected component
+      features[region_id][1] += (double) qRed(image.pixel(c, r));
+      features[region_id][2] += (double) qGreen(image.pixel(c, r));
+      features[region_id][3] += (double) qBlue(image.pixel(c, r));
     }
 
-    // Return the created feature vector
-    return featurevector;
+  // Save the mean RGB and size values as image feature after normalization
+  for(int m = 0; m < num_regions; m++) {
+    for(int n = 1; n < featurevectorlength; n++) features[m][n] /= features[m][0]*255.0;
+    features[m][0] /= (double) w*h;
+    featurevector.push_back(features[m]);
+  }
+
+  // Return the created feature vector
+  return featurevector;
 }
 
 

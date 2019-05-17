@@ -3,6 +3,7 @@
 #include <iostream>
 #include <string>
 #include <thread>
+#include <utility>
 
 #include <QtGui>
 #include <QFileDialog>
@@ -72,9 +73,8 @@ void MainWindow::LoadDatabase() {
                                   std::atomic<int>* num_images_processed) {
           for (int j = begin; j < end; ++j) {
             qInfo() << "Processing image" << (j + 1) << QString::fromStdString(names[j]);
-            QImage image;
-            image.load(QString::fromStdString(names[j]));
-            this->databasefeatures[j] = ExtractFeatureVector(image);
+            QImage image; image.load(QString::fromStdString(names[j]));
+            this->databasefeatures[j] = ExtractFeatureVector(std::move(image));
             ++(*num_images_processed);
           }
         }, names, offset, offset + length, &num_images_processed);
@@ -337,12 +337,11 @@ void MainWindow::QueryDatabase()
 {
     ui->progressBox->setText(QString::fromStdString(""));
     distances = new double[num_images];
-    if(ui->checkBox->isChecked())
-        CalculateDistances(false);
-    else
-        CalculateDistances(true);
+    CalculateDistances(!ui->checkBox->isChecked());
     SortDistances();
     ViewDatabase();
+    ui->progressBox->append(QString::fromStdString("Queried with metric " +
+                                                   std::to_string(ui->checkBox->isChecked() ? 2 : 1) + "."));
 }
 
 /***** OPENING A NEW APPLICATION WINDOW *****/
