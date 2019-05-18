@@ -404,7 +404,7 @@ namespace {
     distance += (1 - Color::CosineSimilarity(x, y)) +
       std::abs(x[kRed] - y[kRed]) + std::abs(x[kGreen] - y[kGreen]) + std::abs(x[kBlue] - y[kBlue]);
     // Favor regions with significant overlap.
-    distance += square(1 - BoundingBox::IntersectionOverUnion(x, y))/2.;
+    distance += square(1 - BoundingBox::IntersectionOverUnion(x, y));
     // Centroid distance.
     distance += (square(x[kRow] - y[kRow]) + square(x[kColumn] - y[kColumn]))/2.;
     // GLCM features.
