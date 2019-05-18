@@ -408,8 +408,8 @@ namespace {
     // Centroid distance.
     distance += (square(x[kRow] - y[kRow]) + square(x[kColumn] - y[kColumn]))/2.;
     // GLCM features.
-    distance += square(Glcm::Feature(x, Glcm::Contrast) - Glcm::Feature(y, Glcm::Contrast))*4.;
-    distance += square(Glcm::Feature(x, Glcm::Energy) - Glcm::Feature(y, Glcm::Energy));
+    distance += square(Glcm::Feature(x, Glcm::Contrast) - Glcm::Feature(y, Glcm::Contrast))*2.;
+    distance += square(Glcm::Feature(x, Glcm::Energy) - Glcm::Feature(y, Glcm::Energy))/2.;
     distance += square(Glcm::Feature(x, Glcm::Entropy) - Glcm::Feature(y, Glcm::Entropy))/2.;
     return distance*x[kSize];  // Weight distances by region volume.
   }
