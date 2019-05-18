@@ -5,6 +5,7 @@
 #include <functional>
 #include <limits>
 #include <mutex>
+#include <numeric>
 #include <queue>
 #include <unordered_map>
 #include <thread>
@@ -84,7 +85,7 @@ void Clustering(QImage *image, int num_clusters, int maxit) {
   //render results
   for (int r = 0; r < h; r++)
     for (int c = 0; c < w; c++)
-      image->setPixel(c, r, qRgb(ids[r * w + c],ids[r * w + c],ids[r * w + c]));
+      image->setPixel(c, r, qRgb(ids[r * w + c], ids[r * w + c], ids[r * w + c]));
 }
 
 /**************************************************
@@ -182,7 +183,7 @@ namespace {
         static_cast<double>(num_pixels_in_region[i])/(width*height) < threshold ? -1 : next_remapped_id++;
       remapped_region_ids.push_back(remapped_id);
     }
-    // TODO(pmp10): Add additional code that would replace -1s and merge with one of the big regions.
+    // TODO(pmp10): Add additional code that would replace -1s, and merge with one of the big regions.
     return remapped_region_ids;
   }
 }
@@ -212,8 +213,42 @@ namespace {
     return gray_level/kGlcmBucketSize;
   }
 
-  namespace GlcmFeature {
-    double Contrast(double* glcm) {
+  namespace Color {
+    double Magnitude(const double* const features) {
+      return std::sqrt(std::inner_product(features + kRed, features + kBlue + 1,
+                                          features + kRed, 0.));
+    }
+
+    double CosineSimilarity(const double* const x, const double* const y) {
+      return std::inner_product(x + kRed, x + kBlue + 1, y + kRed, 0.)/(Magnitude(x)*Magnitude(y));
+    }
+  }
+
+  
+  namespace BoundingBox {
+    double Volume(const double* const trbl) {
+      const double height = trbl[2] - trbl[0];
+      const double width = trbl[1] - trbl[3];
+      return height > 0 && width > 0 ? height*width : 0;
+    }
+
+    double IntersectionOverUnion(const double* const x, const double* const y) {
+      const double trbl[4] = {/*top=*/std::max(x[kTop], y[kTop]),
+                              /*right=*/std::min(x[kRight], y[kRight]),
+                              /*bottom=*/std::min(x[kBottom], y[kBottom]),
+                              /*left=*/std::max(x[kLeft], y[kLeft])};
+      const double intersection_volume = Volume(trbl);
+      return intersection_volume/(Volume(x + kTop) + Volume(y + kTop) - intersection_volume);
+    }
+  }
+
+  namespace Glcm {
+    double Feature(const double* const features,
+                   const std::function<double(const double* const)>& feature_fn) {
+      return feature_fn(features + kGlcm);
+    }
+
+    double Contrast(const double* const glcm) {
       double contrast = 0;
       for (int i = 0; i < kGlcmSize; ++i)
         for (int j = 0; j < kGlcmSize; ++j)
@@ -246,9 +281,8 @@ std::vector<double*> MainWindow::ExtractFeatureVector(QImage image) {
   // This time the algorithm returns the cluster id for each pixel, not the rgb values of the corresponding cluster center
   // The code for random seed clustering is provided. You are free to use any clustering algorithm of your choice from HW 1
   // Experiment with the num_clusters and max_iterations values to get the best result
-
-  int num_clusters = 5;
-  int max_iterations = 50;
+  static const int num_clusters = 8;
+  static const int max_iterations = 32;
   QImage image_copy = image;
   Clustering(&image_copy, num_clusters, max_iterations);
 
@@ -266,7 +300,7 @@ std::vector<double*> MainWindow::ExtractFeatureVector(QImage image) {
   memset(nimg, 0, w*h*sizeof(int));
   conrgn(img, nimg, w, h);
 
-  const std::vector<int> remapped_region_ids = ::PreProcessRegions(h, w, nimg, /*threshold=*/0.01);
+  const std::vector<int> remapped_region_ids = ::PreProcessRegions(h, w, nimg, /*threshold=*/1./(1 << 8));
   const int num_regions = *std::max_element(remapped_region_ids.begin(), remapped_region_ids.end()) + 1;
   // The resultant image of Step 2 is 'nimg', whose values range from 1 to num_regions
 
@@ -284,7 +318,7 @@ std::vector<double*> MainWindow::ExtractFeatureVector(QImage image) {
     features[i] = new double[featurevectorlength]();  // initialize with zeros
     features[i][kTop] = h - 1; features[i][kRight] = 0; features[i][kLeft] = w - 1; features[i][kBottom] = 0;
     // Initialize GLCM with a Dirichlet prior.
-    std::fill_n(features[i] + kGlcm, kGlcmSize*kGlcmSize, /*alpha=*/0.01);
+    std::fill_n(features[i] + kGlcm, kGlcmSize*kGlcmSize, /*alpha=*/0.1);
   }
 
   // Accumulate features. We'll normalize for region size later.
@@ -350,21 +384,34 @@ std::vector<double*> MainWindow::ExtractFeatureVector(QImage image) {
 /***** Code to compute the distance between two images *****/
 
 namespace {
-  // Function that implements distance measure 1
+  inline double square(const double x) { return x*x; }
+
+  // Function that implements distance measure 1, Euclidean distance.
   double distance1(const double* vector1, const double* vector2, int length) {
-    // default, for trial only; change according to your distance measure
-    double distance = 0;
-    for (int i = 0; i < length; ++i) {
-      double delta = vector1[i] - vector2[i];
-      distance += delta*delta;
-    }
-    return distance;
+    return std::inner_product(vector1, vector1 + length, vector2, 0.,
+                              [](double x, double y) { return x + y; },
+                              [](double x, double y) { return square(x - y); });
   }
 
   // Function that implements distance measure 2
-  double distance2(const double* vector1, const double* vector2, int length) {
-    // default, for trial only; change according to your distance measure
-    return ((double) rand() / (double) RAND_MAX);
+  double distance2(const double* x, const double* y, int length) {
+    double distance = 0.;
+    // Penalize differing volume.
+    distance += square(x[kSize] - y[kSize]);
+    // Penalize differing intensity.
+    distance += square(Color::Magnitude(x) - Color::Magnitude(y));
+    // Penalize differing color vector.
+    distance += (1 - Color::CosineSimilarity(x, y)) +
+      std::abs(x[kRed] - y[kRed]) + std::abs(x[kGreen] - y[kGreen]) + std::abs(x[kBlue] - y[kBlue]);
+    // Favor regions with significant overlap.
+    distance += square(1 - BoundingBox::IntersectionOverUnion(x, y))/2.;
+    // Centroid distance.
+    distance += (square(x[kRow] - y[kRow]) + square(x[kColumn] - y[kColumn]))/2.;
+    // GLCM features.
+    distance += square(Glcm::Feature(x, Glcm::Contrast) - Glcm::Feature(y, Glcm::Contrast))*4.;
+    distance += square(Glcm::Feature(x, Glcm::Energy) - Glcm::Feature(y, Glcm::Energy));
+    distance += square(Glcm::Feature(x, Glcm::Entropy) - Glcm::Feature(y, Glcm::Entropy))/2.;
+    return distance*x[kSize];  // Weight distances by region volume.
   }
 }
 
